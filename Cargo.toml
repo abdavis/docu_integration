@@ -6,3 +6,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rusqlite = "0.25.3"
+warp = "0.3.1"
+tokio = {version = "1.11.0", features = ["full"]}
+serde = "1.0.130"
+reqwest = "0.11.4"
+toml = "0.5"
