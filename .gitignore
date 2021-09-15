@@ -1,3 +1,5 @@
 /target
-db.sqlite3
 config.toml
+*.sqlite3*
+*.odt
+*.pdf

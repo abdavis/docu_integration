@@ -9,6 +9,9 @@ edition = "2018"
 rusqlite = "0.25.3"
 warp = "0.3.1"
 tokio = {version = "1.11.0", features = ["full"]}
-serde = "1.0.130"
+serde = {version = "1.0.130", features = ["derive"]}
 reqwest = "0.11.4"
 toml = "0.5"
+hmac = "0.11.0"
+csv = "1.1"
+async-channel = "1.6"
