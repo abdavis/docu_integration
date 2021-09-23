@@ -1,6 +1,7 @@
 CREATE TABLE company_batches(
     business_name text unique not null,
     description text,
+    --unix time stamps for both of these dates
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
 );
@@ -23,7 +24,8 @@ create table envelopes(
     fname text,
     mname text,
     lname text,
-    dob date,
+    --Use ISO8601 for dob
+    dob text,
     addr1 text,
     addr2 text,
     city text,
@@ -35,7 +37,7 @@ create table envelopes(
     spouse_mname text,
     spouse_lname text,
     spouse_email text,
-    date_created date not null default(strftime('%s', 'now')),
+    date_created integer not null default(strftime('%s', 'now')),
     pdf blob
 );
 CREATE TABLE beneficiaries(
@@ -45,7 +47,8 @@ CREATE TABLE beneficiaries(
     name text,
     address text,
     city_state_zip text,
-    dob date,
+    --use iso8601
+    dob text,
     relationship text,
     ssn integer,
     percent integer
@@ -53,5 +56,6 @@ CREATE TABLE beneficiaries(
 CREATE TABLE authorized_users(
     gid text not null primary key references envelopes(gid),
     name text,
-    dob date
+    --use iso8601
+    dob text
 );
