@@ -3,3 +3,4 @@ config.toml
 *.sqlite3*
 *.odt
 *.pdf
+*.pem*

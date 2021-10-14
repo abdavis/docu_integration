@@ -11,8 +11,9 @@ warp = "0.3.1"
 tokio = {version = "1.11.0", features = ["full"]}
 serde = {version = "1.0.130", features = ["derive"]}
 serde_json = "1.0"
-reqwest = "0.11.4"
+reqwest = {version = "0.11", features = ["json"]}
 toml = "0.5"
 hmac = "0.11.0"
 csv = "1.1"
 async-channel = "1.6"
+jsonwebtoken = "7.2"
