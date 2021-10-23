@@ -78,7 +78,7 @@ impl Claims {
 		self.exp = time + 3600;
 	}
 }
-
+#[derive(Clone)]
 pub struct AuthHelper {
 	token: String,
 	expire: Instant,

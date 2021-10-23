@@ -1,5 +1,7 @@
-CREATE TABLE company_batches(
-    business_name text unique not null,
+CREATE TABLE batches(
+    id integer primary key,
+    guid text,
+    batch_name text unique not null,
     description text,
     --unix time stamps for both of these dates
     start_date integer not null default(strftime('%s', 'now')),
@@ -17,7 +19,8 @@ CREATE TABLE ssn_batch_relat(
     ssn not null references ssn_host_data(ssn)
 );
 create table envelopes(
-    gid text not null primary key,
+    id integer primary key,
+    guid text,
     ssn integer not null references acct_map(ssn),
     status text,
     api_err text,
@@ -38,6 +41,7 @@ create table envelopes(
     spouse_lname text,
     spouse_email text,
     date_created integer not null default(strftime('%s', 'now')),
+    last_update integer,
     pdf blob
 );
 CREATE TABLE beneficiaries(
