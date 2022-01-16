@@ -1,4 +1,3 @@
-use reqwest::Client;
 use toml;
 use std::fs;
 use serde::{Deserialize, Serialize};
