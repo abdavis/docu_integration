@@ -1,27 +1,31 @@
-CREATE TABLE batches(
+CREATE TABLE company_batches(
     id integer primary key,
-    guid text,
     batch_name text unique not null,
     description text,
     --unix time stamps for both of these dates
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
-);
-CREATE TABLE ssn_host_data(
+) strict;
+
+CREATE TABLE acct_data(
     ssn integer primary key,
     primary_acct integer,
     info_codes text,
     created_account integer,
     host_err text
-);
+) strict;
+
 CREATE TABLE ssn_batch_relat(
-    batch_id not null references company_batches(rowid),
-    ssn not null references ssn_host_data(ssn)
+    batch_id not null references company_batches(id) on delete cascade,
+    ssn not null references acct_data(ssn) on delete cascade
 );
+CREATE INDEX batch_relat_id on ssn_batch_relat(batch_id);
+CREATE INDEX batch_relat_ssn on ssn_batch_relat(ssn);
+
 create table envelopes(
     id integer primary key,
-    guid text,
-    ssn integer not null references acct_map(ssn),
+    guid text unique,
+    ssn integer not null references acct_data(ssn) on delete cascade,
     status text,
     api_err text,
     fname text,
@@ -43,9 +47,12 @@ create table envelopes(
     date_created integer not null default(strftime('%s', 'now')),
     last_update integer,
     pdf blob
-);
+) strict;
+create index envelope_ssn on envelopes(ssn);
+create unique index restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided');
+
 CREATE TABLE beneficiaries(
-    gid text not null primary key references envelopes(gid),
+    gid text primary key references envelopes(gid) on delete cascade,
     --primary/contingent
     type text,
     name text,
@@ -56,10 +63,13 @@ CREATE TABLE beneficiaries(
     relationship text,
     ssn integer,
     percent integer
-);
+) strict;
+create index benefic_gid on beneficiaries(gid);
+
 CREATE TABLE authorized_users(
-    gid text not null primary key references envelopes(gid),
+    gid text primary key references envelopes(gid) on delete cascade,
     name text,
     --use iso8601
     dob text
-);
+) strict;
+create index author_gid on authorized_users(gid);
