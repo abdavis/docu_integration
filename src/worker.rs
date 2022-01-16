@@ -1,17 +1,19 @@
 use async_channel;
 use tokio::task;
 use tokio::sync::oneshot;
-use crate::CsvImport;
+use crate::db::CsvImport;
 use crate::Config;
 use serde::Serialize;
 use reqwest::Client;
 use crate::oauth::AuthHelper;
 
-pub fn init(concurrent_workers: usize, config: &Config, token: AuthHelper) ->
+const NUM_WORKERS: u8 = 10;
+
+pub fn init(config: &Config, token: AuthHelper) ->
 async_channel::Sender<(CsvImport, oneshot::Sender<Result<CsvImport, CsvImport>>)> {
-	let (tx, rx) = async_channel::bounded(concurrent_workers * 10);
+	let (tx, rx) = async_channel::bounded((NUM_WORKERS * 10).into());
 	let http_client = Client::new();
-	for n in 0..concurrent_workers {
+	for n in 0..NUM_WORKERS {
 		let rx = rx.clone();
 		let http_client = http_client.clone();
 		let config = config.clone();

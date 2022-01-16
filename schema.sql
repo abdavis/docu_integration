@@ -49,7 +49,7 @@ create table envelopes(
     pdf blob
 ) strict;
 create index envelope_ssn on envelopes(ssn);
-create unique index restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided');
+create unique index restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided', 'host_issue');
 
 CREATE TABLE beneficiaries(
     gid text primary key references envelopes(gid) on delete cascade,

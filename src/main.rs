@@ -8,6 +8,7 @@ use serde_json;
 
 mod oauth;
 mod worker;
+mod db;
 
 #[tokio::main]
 async fn main(){
@@ -20,29 +21,7 @@ async fn main(){
 	
 
 }
-#[derive(Clone)]
-pub struct CsvImport {
-	ssn: u64,
-	first_name: String,
-	middle_name: Option<String>,
-	last_name: String,
-	dob: String,
-	addr1: String,
-	addr2: Option<String>,
-	city: String,
-	state: String,
-	zip: String,
-	email: String,
-	phone: String,
-	spouse: Option<CsvSpouse>
-}
-#[derive(Clone)]
-struct CsvSpouse {
-	first_name: String,
-	middle_name: Option<String>,
-	last_name: String,
-	email: String
-}
+
 #[derive(Deserialize, Clone)]
 pub struct Config {
 	network: Network,
