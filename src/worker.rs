@@ -28,7 +28,7 @@ rx: async_channel::Receiver<(CsvImport, oneshot::Sender<Result<CsvImport, CsvImp
 
 }
 
-impl Envelope {
+impl NewEnvelope {
 	fn from_csv(csv: &CsvImport, config: &Config) -> Self {
 		let csv = csv.clone();
 		let mut env = Self {
@@ -94,7 +94,7 @@ impl Envelope {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Envelope {
+struct NewEnvelope {
 	template_id: String,
 	template_roles: Vec<EnvelopeRecipient>,
 	status: String

@@ -2,12 +2,15 @@ use rusqlite::{params, Connection};
 use crossbeam_channel;
 use tokio::sync::oneshot;
 
+const READ_THREADS: u8 = 4;
+
 pub enum WriteAction{
     NewBatch {
         batch_name: String,
         description: String,
-        records: Vec<(Acct, CsvImport)>
+        records: Vec<CsvImport>
     },
+	UpdateAcct(Acct)
 }
 
 pub type WriteResult = Result<success, fail>;

@@ -1,3 +1,6 @@
+pragma journal_mode = wal;
+pragma foreign_keys = on;
+
 CREATE TABLE company_batches(
     id integer primary key,
     batch_name text unique not null,
@@ -16,10 +19,12 @@ CREATE TABLE acct_data(
 ) strict;
 
 CREATE TABLE ssn_batch_relat(
-    batch_id not null references company_batches(id) on delete cascade,
-    ssn not null references acct_data(ssn) on delete cascade
-);
-CREATE INDEX batch_relat_id on ssn_batch_relat(batch_id);
+    batch_id integer not null references company_batches(id) on delete cascade,
+    ssn integer not null references acct_data(ssn) on delete cascade,
+    --boolean: 0/1
+    cancelled integer not null default(0),
+    primary key(batch_id, ssn)
+) strict;
 CREATE INDEX batch_relat_ssn on ssn_batch_relat(ssn);
 
 create table envelopes(
@@ -49,7 +54,7 @@ create table envelopes(
     pdf blob
 ) strict;
 create index envelope_ssn on envelopes(ssn);
-create unique index restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided', 'host_issue');
+create unique index envelopes_restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided', 'spouse_beneficiary');
 
 CREATE TABLE beneficiaries(
     gid text primary key references envelopes(gid) on delete cascade,
