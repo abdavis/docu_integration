@@ -13,17 +13,34 @@ pub enum WriteAction{
 	UpdateAcct(Acct)
 }
 
-pub type WriteResult = Result<success, fail>;
-pub enum success{
+pub type WriteResult = Result<WSuccess, WFail>;
+pub enum WSuccess{
 
 }
-pub enum fail{
+pub enum WFail{
+	duplicate,
+	err
+}
 
+pub enum ReadAction{
+	ActiveBatches,
+	BatchDetail,
+	OldBatches{page: u32}
+}
+
+pub type ReadResult = Result<RSuccess, RFail>;
+pub enum RSuccess{
+	ActiveBatches(Vec<BatchSummary>),
+	BatchDetail(Vec<(CsvImport, Acct)>),
+	OldBatches(Vec<BatchSummary>)
+}
+pub enum RFail{
+	Err
 }
 
 #[derive(Clone)]
-pub struct CsvImport {
-	pub ssn: u64,
+pub struct CsvImport{
+	pub ssn: u32,
 	pub first_name: String,
 	pub middle_name: Option<String>,
 	pub last_name: String,
@@ -46,13 +63,25 @@ pub struct CsvSpouse {
 }
 
 pub struct Acct {
-    pub ssn: u64,
-    pub primary_acct: Option<u64>,
+    pub ssn: u32,
+    pub primary_acct: Option<u32>,
     pub info_codes: Option<String>,
-    pub created_acct: Option<u64>,
+    pub created_acct: Option<u32>,
     pub host_err: Option<String>
 }
 
+pub struct BatchSummary{
+	pub name: String,
+	pub description: String,
+	pub total: u32,
+	pub working: u32,
+	pub complete: u32,
+	pub err: u32
+}
 fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender<WriteResult>)>) {
+
+}
+
+fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<ReadResult>)>){
 
 }
