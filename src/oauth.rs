@@ -22,8 +22,7 @@ pub fn auth_initiate (config: &Config) -> AuthHelper {
 	}
 }
 
-async fn auth_server (config: Config,
-	rx: async_channel::Receiver<oneshot::Sender<(String, Instant)>>) {
+async fn auth_server (config: Config, rx: async_channel::Receiver<oneshot::Sender<(String, Instant)>>) {
 	let rsa_pem = std::fs::read("rsa_private_key.pem").expect("res_private_key.pem is missing.");
 	let key = EncodingKey::from_rsa_pem(&rsa_pem).unwrap();
 	let head = Header::new(Algorithm::RS256);
@@ -47,9 +46,6 @@ async fn auth_server (config: Config,
 			tx.send(token.clone());
 		}
 	}
-
-
-	
 
 	async fn renew_token(head: &Header, claims: &Claims, key: &EncodingKey, http_client: &Client) -> (String, Instant) {
 		let jwt = encode(head, claims, key).unwrap();

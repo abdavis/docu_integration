@@ -1,9 +1,8 @@
 use toml;
-use std::fs;
+use std::{fs, thread};
 use serde::{Deserialize, Serialize};
 use async_channel;
-use tokio::{sync::oneshot, task};
-use tokio;
+use tokio::{sync::oneshot, task, self};
 use serde_json;
 
 mod oauth;
@@ -16,9 +15,22 @@ async fn main(){
 	.expect("Improper Config");
 	
 	let mut token_auth = oauth::auth_initiate(&config);
-	
 
+	token_auth.get().await;
 	
+	let (wtx, rtx, handles) = db::init();
+	let (tx, rx) = oneshot::channel();
+	wtx.send((db::WriteAction::NewBatch{batch_name: "Bob's Burgers 2".into(), description: "A wonderful burger joint".into(), records: vec![]}, tx));
+
+	println!("{:?}", rx.await);
+	drop(wtx);
+	drop(rtx);
+
+	task::block_in_place( || {
+		for handle in handles{
+			handle.join();
+		}
+	})
 
 }
 

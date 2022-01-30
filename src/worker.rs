@@ -10,7 +10,7 @@ use crate::oauth::AuthHelper;
 const NUM_WORKERS: u8 = 10;
 
 pub fn init(config: &Config, token: AuthHelper) ->
-async_channel::Sender<(CsvImport, oneshot::Sender<Result<CsvImport, CsvImport>>)> {
+async_channel::Sender<(CsvImport)> {
 	let (tx, rx) = async_channel::bounded((NUM_WORKERS * 10).into());
 	let http_client = Client::new();
 	for n in 0..NUM_WORKERS {
@@ -24,7 +24,7 @@ async_channel::Sender<(CsvImport, oneshot::Sender<Result<CsvImport, CsvImport>>)
 }
 
 async fn worker(http_client: Client, config: Config, token: AuthHelper,
-rx: async_channel::Receiver<(CsvImport, oneshot::Sender<Result<CsvImport, CsvImport>>)>){
+rx: async_channel::Receiver<(CsvImport)>){
 
 }
 

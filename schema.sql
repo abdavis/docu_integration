@@ -1,15 +1,15 @@
 pragma journal_mode = wal;
 pragma foreign_keys = on;
-
 CREATE TABLE company_batches(
     id integer primary key,
-    batch_name text unique not null,
+    batch_name text not null,
     description text,
     --unix time stamps for both of these dates
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
 ) strict;
-
+CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name)
+WHERE end_date IS NULL;
 CREATE TABLE acct_data(
     ssn integer primary key,
     primary_acct integer,
@@ -17,7 +17,6 @@ CREATE TABLE acct_data(
     created_account integer,
     host_err text
 ) strict;
-
 CREATE TABLE ssn_batch_relat(
     batch_id integer not null references company_batches(id) on delete cascade,
     ssn integer not null references acct_data(ssn) on delete cascade,
@@ -26,12 +25,12 @@ CREATE TABLE ssn_batch_relat(
     primary key(batch_id, ssn)
 ) strict;
 CREATE INDEX batch_relat_ssn on ssn_batch_relat(ssn);
-
 create table envelopes(
     id integer primary key,
     guid text unique,
     ssn integer not null references acct_data(ssn) on delete cascade,
     status text,
+    void_reason text,
     api_err text,
     fname text,
     mname text,
@@ -41,7 +40,7 @@ create table envelopes(
     addr1 text,
     addr2 text,
     city text,
-    sate text,
+    state text,
     zip text,
     email text,
     phone text,
@@ -54,10 +53,11 @@ create table envelopes(
     pdf blob
 ) strict;
 create index envelope_ssn on envelopes(ssn);
-create unique index envelopes_restrict_active on envelopes(ssn) where status is null or status not in ('completed', 'declined', 'voided', 'spouse_beneficiary');
-
+create unique index envelopes_restrict_active on envelopes(ssn)
+where status is null
+    or status not in ('completed', 'declined', 'voided', 'cancelled');
 CREATE TABLE beneficiaries(
-    gid text primary key references envelopes(gid) on delete cascade,
+    gid text primary key not null references envelopes(gid) on delete cascade,
     --primary/contingent
     type text,
     name text,
@@ -70,9 +70,8 @@ CREATE TABLE beneficiaries(
     percent integer
 ) strict;
 create index benefic_gid on beneficiaries(gid);
-
 CREATE TABLE authorized_users(
-    gid text primary key references envelopes(gid) on delete cascade,
+    gid text primary key not null references envelopes(gid) on delete cascade,
     name text,
     --use iso8601
     dob text
