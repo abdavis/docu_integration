@@ -8,7 +8,8 @@ CREATE TABLE company_batches(
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
 ) strict;
-CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name)
+CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name);
+CREATE INDEX company_batches_end ON company_batches(end_date);
 WHERE end_date IS NULL;
 CREATE TABLE acct_data(
     ssn integer primary key,
@@ -21,13 +22,13 @@ CREATE TABLE ssn_batch_relat(
     batch_id integer not null references company_batches(id) on delete cascade,
     ssn integer not null references acct_data(ssn) on delete cascade,
     --boolean: 0/1
-    cancelled integer not null default(0),
+    ignore_error integer not null default(FALSE),
     primary key(batch_id, ssn)
 ) strict;
 CREATE INDEX batch_relat_ssn on ssn_batch_relat(ssn);
 create table envelopes(
     id integer primary key,
-    guid text unique,
+    gid text unique,
     ssn integer not null references acct_data(ssn) on delete cascade,
     status text,
     void_reason text,
@@ -48,18 +49,16 @@ create table envelopes(
     spouse_mname text,
     spouse_lname text,
     spouse_email text,
-    date_created integer not null default(strftime('%s', 'now')),
-    last_update integer,
-    pdf blob
+    date_created integer not null default(strftime('%s', 'now'))
 ) strict;
 create index envelope_ssn on envelopes(ssn);
 create unique index envelopes_restrict_active on envelopes(ssn)
 where status is null
     or status not in ('completed', 'declined', 'voided', 'cancelled');
 CREATE TABLE beneficiaries(
-    gid text primary key not null references envelopes(gid) on delete cascade,
+    gid text not null references envelopes(gid) on delete cascade,
     --primary/contingent
-    type text,
+    type text CHECK(type in ('primary', 'contingent')),
     name text,
     address text,
     city_state_zip text,
@@ -71,9 +70,13 @@ CREATE TABLE beneficiaries(
 ) strict;
 create index benefic_gid on beneficiaries(gid);
 CREATE TABLE authorized_users(
-    gid text primary key not null references envelopes(gid) on delete cascade,
+    gid text not null references envelopes(gid) on delete cascade,
     name text,
     --use iso8601
     dob text
 ) strict;
 create index author_gid on authorized_users(gid);
+create table pdf(
+    gid text primary key not null references envelopes(gid) on delete cascade,
+    complete_pdf blob
+) strict;
