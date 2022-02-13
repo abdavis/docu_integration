@@ -33,23 +33,36 @@ create table envelopes(
     status text,
     void_reason text,
     api_err text,
-    fname text,
+    fname text NOT NULL,
     mname text,
-    lname text,
+    lname text NOT NULL,
     --Use ISO8601 for dob
-    dob text,
-    addr1 text,
+    dob text NOT NULL,
+    addr1 text NOT NULL,
     addr2 text,
-    city text,
-    state text,
-    zip text,
-    email text,
-    phone text,
+    city text NOT NULL,
+    state text NOT NULL,
+    zip text NOT NULL,
+    email text NOT NULL,
+    phone text NOT NULL,
     spouse_fname text,
     spouse_mname text,
     spouse_lname text,
     spouse_email text,
-    date_created integer not null default(strftime('%s', 'now'))
+    date_created integer not null default(strftime('%s', 'now')) -- make sure all spouse fields are empty, or fname, lname, and email are populated
+    CHECK(
+        (
+            spouse_fname IS NULL
+            AND spouse_mname IS NULL
+            AND spouse_lname IS NULL
+            AND spouse_email IS NULL
+        )
+        OR (
+            spouse_fname IS NOT NULL
+            AND spouse_lname IS NOT NULL
+            AND spouse_email IS NOT NULL
+        )
+    )
 ) strict;
 create index envelope_ssn on envelopes(ssn);
 create unique index envelopes_restrict_active on envelopes(ssn)

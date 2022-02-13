@@ -153,7 +153,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 						}
 					}
 
-					WriteAction::UpdateAcct(acct) => match tran.prepare_cached("UPDATE acct_data SET primary_acct = :acct_num, info_codes = :info, created_acct = :new_acct, host_err = :err WHERE ssn = :ssn") {
+					WriteAction::UpdateAcct(acct) => match tran.prepare_cached("UPDATE acct_data SET primary_acct = :acct_num, info_codes = :info, created_account = :new_acct, host_err = :err WHERE ssn = :ssn") {
 						Ok(mut stmt) => match stmt.execute(named_params!{":acct_num": acct.primary_acct, ":info": acct.info_codes, ":new_acct": acct.created_acct, ":err": acct.host_err, ":ssn": acct.ssn}) {
 							Ok(updates) => if updates == 1 {WriteResult::Ok(0)} else {WriteResult::Err(WFail::NoRecord)},
 							Err(_) => WriteResult::Err(WFail::DbError("Unable to execute UpdateAcct stmt".into()))
@@ -170,7 +170,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 						Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare status update".into()))
 					},
 
-					WriteAction::SetGid { id, gid, status, api_err, void_reason } => match tran.prepare_cached(
+					WriteAction::UpdateStatusWithId{ id, gid, status, api_err, void_reason } => match tran.prepare_cached(
 							"UPDATE envelopes SET gid = :gid, status = :status, api_err = :api_err, void_reason = :void_reason WHERE id = :id") {
 						Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare set gid query".into())),
 						Ok(mut stmt) => match stmt.execute(named_params!{":id": id, ":gid": gid, ":status": status, ":api_err": api_err, ":void_reason": void_reason}) {
@@ -179,14 +179,20 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 						}
 					}
 
-					WriteAction::CompleteEnvelope { gid, status, beneficiaries, authorized_users, pdf } => match tran.prepare_cached("UPDATE envelopes SET status = :status, pdf = :pdf WHERE gid = :gid") {
-						Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare set status query".into())),
-						Ok(mut stmt) => match stmt.execute(named_params!{":status": status, ":gid": gid, ":pdf": pdf}) {
-							Ok(num) => match num {
-								1 => {
+					WriteAction::CompleteEnvelope { gid, status, beneficiaries, authorized_users, pdf } => match (
+						tran.prepare_cached("UPDATE envelopes SET status = :status WHERE gid = :gid"),
+						tran.prepare_cached("INSERT INTO pdf (gid, complete_pdf) VALUES (:gid, :pdf)")
+					){
+						(Err(_), _) | (_, Err(_))=> WriteResult::Err(WFail::DbError("Unable to prepare complete envelope query".into())),
+						(Ok(mut stmt), Ok(mut pdf_stmt)) => match (
+							stmt.execute(named_params!{":status": status, ":gid": gid}),
+							pdf_stmt.execute(named_params!{":gid": gid, ":pdf": pdf})
+						) {
+							(Ok(num), Ok(pdf_num)) => match (num, pdf_num) {
+								(1, 1) => {
 									match (
 										tran.prepare_cached("INSERT INTO beneficiaries (gid, type, name, address, city_state_zip, dob, relationship, ssn, percent)
-											VALUES (:gid, :type, :name, :address, :city_state_zip, :dob, :relationship, :ssn, :percent"),
+											VALUES (:gid, :type, :name, :address, :city_state_zip, :dob, :relationship, :ssn, :percent)"),
 										tran.prepare_cached("INSERT INTO authorized_users (gid, name, dob) VALUES (:gid, :name, :dob)")
 									) {
 										(Ok(mut benef_insert), Ok(mut auth_insert)) => {
@@ -225,7 +231,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 								}
 								_=> WriteResult::Err(WFail::NoRecord)
 							}
-							Err(_) => WriteResult::Err(WFail::DbError("Unable to update completed status".into())),
+							(Err(_), _) | (_, Err(_)) => WriteResult::Err(WFail::DbError("Unable to update completed status".into())),
 
 
 						}
@@ -479,9 +485,72 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 				}
 			}
 
-			ReadAction::FetchPdf => ReadResult::Err("placeholder".into()),
+			ReadAction::FetchPdf{gid} => {
+				match conn.prepare_cached("SELECT complete_pdf FROM pdf WHERE gid = :gid") {
+					Ok(mut stmt) => match stmt.query(named_params!{":gid": gid}) {
+						Ok(mut rows) => match rows.next() {
+							Err(_) => Err("Unable to get pdf blob".into()),
+							Ok(Some(row)) => match row.get(0) {
+								Ok(blob) => ReadResult::Ok(RSuccess::PdfBlob(blob)),
+								Err(_) => Err("Unable to get pdf blob".into())
+							},
+							Ok(None) => Err("Blob does not exist".into())
+						}
+						Err(_) => Err("Unable to get pdf blob".into())
+					}
+					Err(_) => Err("Invalid blob query".into())
+				}
+			}
 
-			ReadAction::NewEnvelopes => ReadResult::Err("placeholder".into())
+			ReadAction::NewEnvelopes => {
+				match conn.prepare_cached("
+				SELECT id, ssn, fname, mname, lname, dob, addr1, addr2, city, state, zip,
+					email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email
+				FROM envelopes
+				WHERE gid IS NULL AND status IS NULL
+				") {
+					Err(_) => Err("Unable to prepare new envelopes stmt".into()),
+					Ok(mut stmt) => {
+						match stmt.query([]) {
+							Err(_) => Err("Unable to query new envelopes stmt".into()),
+							Ok(mut rows) => {
+								let mut closure = || {
+									let mut envelopes = vec!();
+									loop {
+										match rows.next() {
+											Err(_) => return Err("Unable to get envelope detail".into()),
+											Ok(None) => break,
+											Ok(Some(row)) => match (
+												row.get(0), row.get(1), row.get(2), row.get(3), row.get(4), row.get(5), row.get(6),
+												row.get(7), row.get(8), row.get(9), row.get(10), row.get(11), row.get(12),
+												row.get(13), row.get(14), row.get(15), row.get(16)
+											) {
+												(
+													Ok(id), Ok(ssn), Ok(first_name), Ok(middle_name), Ok(last_name), Ok(dob), Ok(addr1),
+													Ok(addr2), Ok(city), Ok(state), Ok(zip), Ok(email), Ok(phone), Ok(spouse_fname),
+													Ok(spouse_mname),Ok(spouse_lname), Ok(spouse_email)
+												) => envelopes.push(EnvelopeDetail{
+													id, ssn, first_name, middle_name, last_name, dob, addr1, addr2, city, state, zip,
+													email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email,
+													date_created: "".into(), gid: None, status: None, void_reason: None, api_err: None,
+													auth_users: vec!(), beneficiaries: vec!()
+												}),
+
+												_=> return Err("Unable to get envelope detail".into())
+											}
+
+										}
+									}
+
+									Ok(RSuccess::EnvelopeDetails(envelopes))
+								};
+
+								closure()
+							}
+						}
+					}
+				}
+			}
 
 		});
 	}
@@ -503,10 +572,10 @@ pub enum WriteAction {
 		api_err: Option<String>
 	},
 
-	SetGid {
+	UpdateStatusWithId {
 		id: i64,
-		gid: String,
-		status: Option<String>,
+		gid: Option<String>,
+		status: String,
 		void_reason: Option<String>,
 		api_err: Option<String>
 	},
@@ -579,7 +648,7 @@ pub enum ReadAction {
 	BatchDetail{rowid: i64},
 	//ssn for individual detail
 	EnvelopeDetail{ssn:u32},
-	FetchPdf,
+	FetchPdf{gid: String},
 	NewEnvelopes
 }
 

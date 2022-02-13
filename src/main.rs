@@ -5,9 +5,9 @@ use std::{fs, thread};
 use tokio::{self, sync::oneshot, task};
 use toml;
 
+mod batch_processor;
 mod db;
 mod oauth;
-mod worker;
 
 #[tokio::main]
 async fn main() {
