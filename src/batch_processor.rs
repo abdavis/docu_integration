@@ -103,7 +103,17 @@ pub async fn new_batch_processor(
 					}
 					Err(error) => println!("Unable to parse json body: {error}"),
 				},
-				400..=499 => match resp.json::<ErrorDetails>().await {},
+				400..=499 => {
+					let headers = resp.headers();
+					match resp.json::<ErrorDetails>().await {
+						Ok(error_detail) => {
+							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {
+								
+							}
+						}
+						Err(_) => println!("unable to parse error msg")
+					}
+				},
 				500..=599 => {}
 				_ => {}
 			},
@@ -119,6 +129,10 @@ pub async fn new_batch_processor(
 		struct ErrorDetails {
 			error_code: String,
 			message: String,
+		}
+		enum Retry {
+			count(i32),
+			time(i32)
 		}
 	}
 }
