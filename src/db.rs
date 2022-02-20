@@ -7,6 +7,9 @@ const READ_THREADS: usize = 4;
 const WRITE_CHANNEL_SIZE: usize = 100;
 const READ_CHANNEL_SIZE: usize = 400;
 
+pub type write_tx = crossbeam_channel::Sender<(WriteAction, oneshot::Sender<WriteResult>)>;
+pub type read_tx = crossbeam_channel::Sender<(ReadAction, oneshot::Sender<ReadResult>)>;
+
 pub fn init() -> (
 	crossbeam_channel::Sender<(WriteAction, oneshot::Sender<WriteResult>)>,
 	crossbeam_channel::Sender<(ReadAction, oneshot::Sender<ReadResult>)>,
@@ -544,7 +547,6 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 
 									Ok(RSuccess::EnvelopeDetails(envelopes))
 								};
-
 								closure()
 							}
 						}

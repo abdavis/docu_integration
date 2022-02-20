@@ -24,7 +24,9 @@ async fn auth_server(
 	config: Config,
 	rx: async_channel::Receiver<oneshot::Sender<(String, Instant)>>,
 ) {
-	let rsa_pem = std::fs::read("rsa_private_key.pem").expect("rsa_private_key.pem is missing.");
+	println!("Auth server started");
+	let rsa_pem =
+		std::fs::read("oauth_keys/rsa_private_key.pem").expect("rsa_private_key.pem is missing.");
 	let key = EncodingKey::from_rsa_pem(&rsa_pem).unwrap();
 	let head = Header::new(Algorithm::RS256);
 	let http_client = reqwest::Client::new();
@@ -37,7 +39,7 @@ async fn auth_server(
 		exp: 0,
 	};
 	claims.update();
-	let mut token = renew_token(&head, &claims, &key, &http_client).await;
+	let mut token = ("".to_string(), Instant::now());
 	while let Ok(tx) = rx.recv().await {
 		if token.1 > Instant::now() {
 			tx.send(token.clone());

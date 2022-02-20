@@ -1,6 +1,7 @@
 use crate::db;
 use crate::oauth::AuthHelper;
 use crate::Config;
+use async_channel;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -8,42 +9,55 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
 const CONCURRENCY_BUFFER: usize = 10;
-
-pub async fn new_batch_processor(
+pub fn init_batch_processor(
+	http_client: &Client,
+	config: &Config,
+	token: &AuthHelper,
+	db_wtx: db::write_tx,
+	db_rtx: db::read_tx,
+) -> (async_channel::Sender<()>, task::JoinHandle<()>) {
+	let http_client = http_client.clone();
+	let config = config.clone();
+	let token = token.clone();
+	let (tx, rx) = async_channel::bounded(10);
+	let handle = task::spawn(async move {
+		new_batch_processor(http_client, config, token, rx, db_wtx, db_rtx).await
+	});
+	(tx, handle)
+}
+async fn new_batch_processor(
 	http_client: Client,
 	config: Config,
 	mut token: AuthHelper,
-	mut rx: mpsc::Receiver<()>,
-	db_wtx: crossbeam_channel::Sender<(db::WriteAction, oneshot::Sender<db::WriteResult>)>,
-	db_rtx: crossbeam_channel::Sender<(db::ReadAction, oneshot::Sender<db::ReadResult>)>,
+	rx: async_channel::Receiver<()>,
+	db_wtx: db::write_tx,
+	db_rtx: db::read_tx,
 ) {
-	while let Some(_) = rx.recv().await {
+	println!("Batch Processer started");
+	while let Ok(_) = rx.recv().await {
 		let (otx, orx) = oneshot::channel();
 
 		match db_rtx.try_send((db::ReadAction::NewEnvelopes, otx)) {
 			Err(_) => (),
 			Ok(_) => match orx.await {
 				Ok(db::ReadResult::Ok(db::RSuccess::EnvelopeDetails(envelopes))) => {
+					token.get().await;
 					stream::iter(envelopes)
 						.map(|envelope| {
-							let mut token = token.clone();
+							println! {"Envelope Api Called"}
+							let token = token.clone();
 							let http_client = http_client.clone();
 							let config = config.clone();
 							let db_wtx = db_wtx.clone();
 							async move {
-								send_envelope(
-									http_client,
-									&config,
-									token.get().await,
-									db_wtx,
-									envelope,
-								)
-								.await
+								send_envelope(http_client, &config, token, db_wtx, envelope).await
 							}
 						})
-						.buffer_unordered(CONCURRENCY_BUFFER);
+						.buffer_unordered(CONCURRENCY_BUFFER)
+						.collect::<()>()
+						.await;
 				}
-				_ => (),
+				_ => println!("unable to get batch from db"),
 			},
 		}
 	}
@@ -51,7 +65,7 @@ pub async fn new_batch_processor(
 	async fn send_envelope(
 		client: Client,
 		config: &Config,
-		token: String,
+		mut token: AuthHelper,
 		db_writer: crossbeam_channel::Sender<(db::WriteAction, oneshot::Sender<db::WriteResult>)>,
 		envelope: db::EnvelopeDetail,
 	) {
@@ -63,7 +77,7 @@ pub async fn new_batch_processor(
 					+ &config.docusign.user_account_id
 					+ "/envelopes",
 			)
-			.bearer_auth(token)
+			.bearer_auth(token.get().await)
 			.json(&NewEnvelope::from_db_env(&envelope, config))
 			.send()
 			.await;
@@ -100,22 +114,31 @@ pub async fn new_batch_processor(
 							},
 							tx,
 						));
+
+						match rx.await {
+							Ok(result) => {
+								if let Err(msg) = result {
+									//todo: log write error
+								}
+							}
+							Err(msg) => (), //todo: log oneshot channel error
+						}
+						println!("Docusign sent!")
 					}
 					Err(error) => println!("Unable to parse json body: {error}"),
 				},
 				400..=499 => {
 					let headers = resp.headers();
+					println!("{resp:?}");
 					match resp.json::<ErrorDetails>().await {
 						Ok(error_detail) => {
-							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {
-								
-							}
+							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {}
 						}
-						Err(_) => println!("unable to parse error msg")
+						Err(_) => println!("unable to parse error msg"),
 					}
-				},
-				500..=599 => {}
-				_ => {}
+				}
+				500..=599 => (),
+				_ => (),
 			},
 		}
 		#[derive(Deserialize)]
@@ -130,10 +153,6 @@ pub async fn new_batch_processor(
 			error_code: String,
 			message: String,
 		}
-		enum Retry {
-			count(i32),
-			time(i32)
-		}
 	}
 }
 
@@ -141,7 +160,6 @@ impl NewEnvelope {
 	fn from_db_env(db_env: &db::EnvelopeDetail, config: &Config) -> Self {
 		let mut env = Self {
 			template_id: config.docusign.templateId.clone(),
-			transaction_id: db_env.id.to_string(),
 			template_roles: vec![EnvelopeRecipient {
 				name: format!(
 					"{} {}{}",
@@ -189,6 +207,29 @@ impl NewEnvelope {
 				}),
 			}],
 			status: "sent".into(),
+			event_notification: EventNotification {
+				url: config.network.endpoint_url.clone() + "/webhook",
+				require_acknowledgment: "true".into(),
+				logging_enabled: "true".into(),
+				delivery_mode: "SIM".into(),
+				events: vec![
+					"envelope-resent".into(),
+					"envelope-delivered".into(),
+					"envelope-completed".into(),
+					"envelope-declined".into(),
+					"envelope-voided".into(),
+					"envelope-corrected".into(),
+					"envelope-purge".into(),
+					"envelope-deleted".into(),
+				],
+				event_data: EventData {
+					version: "restv2.1".into(),
+					format: "json".into(),
+					include_data: vec!["tabs".into()],
+				},
+				include_envelope_void_reason: "true".into(),
+				include_HMAC: "true".into(),
+			},
 		};
 
 		if let (Some(fname), Some(lname), Some(email)) = (
@@ -221,9 +262,9 @@ impl NewEnvelope {
 #[serde(rename_all = "camelCase")]
 struct NewEnvelope {
 	template_id: String,
-	transaction_id: String,
 	template_roles: Vec<EnvelopeRecipient>,
 	status: String,
+	event_notification: EventNotification,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -245,4 +286,23 @@ struct Tabs {
 struct TabValue {
 	tab_label: String,
 	value: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EventNotification {
+	url: String,
+	require_acknowledgment: String,
+	logging_enabled: String,
+	delivery_mode: String,
+	events: Vec<String>,
+	event_data: EventData,
+	include_envelope_void_reason: String,
+	include_HMAC: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EventData {
+	version: String,
+	format: String,
+	include_data: Vec<String>,
 }
