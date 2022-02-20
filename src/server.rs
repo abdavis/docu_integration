@@ -17,19 +17,22 @@ async fn server(config: crate::Config) {
 		.and(warp::body::content_length_limit(4194304))
 		.and(warp::header::headers_cloned())
 		.and(warp::body::bytes())
-		.map(
-			move |headers: HeaderMap, bytes: Bytes| match verify_msg(&key, &headers, &bytes) {
-				Ok(_) => {
-					println!("Message is Valid!");
-					warp::reply().into_response()
+		.then(move |headers: HeaderMap, bytes: Bytes| {
+			let key = key.clone();
+			async move {
+				match verify_msg(&key, &headers, &bytes) {
+					Ok(_) => {
+						println!("Message is Valid!");
+						process_msg(bytes).await.into_response()
+					}
+					Err(string) => {
+						println!("{string}");
+						warp::reply::with_status(warp::reply(), http::StatusCode::UNAUTHORIZED)
+							.into_response()
+					}
 				}
-				Err(string) => {
-					println!("{string}");
-					warp::reply::with_status(warp::reply(), http::StatusCode::UNAUTHORIZED)
-						.into_response()
-				}
-			},
-		);
+			}
+		});
 
 	warp::serve(webhook)
 		.tls()
@@ -40,7 +43,9 @@ async fn server(config: crate::Config) {
 
 	println!("Shutting down Server");
 }
-
+async fn process_msg(bytes: Bytes) -> impl Reply {
+	warp::reply()
+}
 fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Result<(), String> {
 	let calculated_tag = base64::encode(hmac::sign(key, bytes));
 	println!("calculated_tag: {calculated_tag}");

@@ -5,7 +5,7 @@ use async_channel;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio::task;
 
 const CONCURRENCY_BUFFER: usize = 10;
@@ -13,8 +13,8 @@ pub fn init_batch_processor(
 	http_client: &Client,
 	config: &Config,
 	token: &AuthHelper,
-	db_wtx: db::write_tx,
-	db_rtx: db::read_tx,
+	db_wtx: db::WriteTx,
+	db_rtx: db::ReadTx,
 ) -> (async_channel::Sender<()>, task::JoinHandle<()>) {
 	let http_client = http_client.clone();
 	let config = config.clone();
@@ -30,8 +30,8 @@ async fn new_batch_processor(
 	config: Config,
 	mut token: AuthHelper,
 	rx: async_channel::Receiver<()>,
-	db_wtx: db::write_tx,
-	db_rtx: db::read_tx,
+	db_wtx: db::WriteTx,
+	db_rtx: db::ReadTx,
 ) {
 	println!("Batch Processer started");
 	while let Ok(_) = rx.recv().await {
