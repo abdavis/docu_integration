@@ -132,6 +132,7 @@ async fn new_batch_processor(
 					println!("{resp:?}");
 					match resp.json::<ErrorDetails>().await {
 						Ok(error_detail) => {
+							println!("{error_detail:?}");
 							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {}
 						}
 						Err(_) => println!("unable to parse error msg"),
@@ -147,7 +148,7 @@ async fn new_batch_processor(
 			envelope_id: String,
 			status: String,
 		}
-		#[derive(Deserialize)]
+		#[derive(Deserialize, Debug)]
 		#[serde(rename_all = "camelCase")]
 		struct ErrorDetails {
 			error_code: String,
@@ -225,7 +226,7 @@ impl NewEnvelope {
 				event_data: EventData {
 					version: "restv2.1".into(),
 					format: "json".into(),
-					include_data: vec!["tabs".into()],
+					include_data: vec!["tabs".into(), "recipients".into()],
 				},
 				include_envelope_void_reason: "true".into(),
 				include_HMAC: "true".into(),

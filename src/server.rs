@@ -1,5 +1,6 @@
 use ring::hmac;
 use tokio::task;
+use serde::Deserialize;
 use warp::{
 	http::{self, HeaderMap},
 	hyper::body::Bytes,
@@ -35,16 +36,29 @@ async fn server(config: crate::Config) {
 		});
 
 	warp::serve(webhook)
-		.tls()
-		.cert_path("cert/cert.pem")
-		.key_path("cert/key.pem")
+		// .tls()
+		// .cert_path("cert/cert.pem")
+		// .key_path("cert/key.pem")
 		.run(([0, 0, 0, 0], 443))
 		.await;
 
 	println!("Shutting down Server");
 }
 async fn process_msg(bytes: Bytes) -> impl Reply {
+
 	warp::reply()
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Msg {
+	event: String,
+	data: MsgData
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MsgData {
+	envelope_id: String,
+	
 }
 fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Result<(), String> {
 	let calculated_tag = base64::encode(hmac::sign(key, bytes));

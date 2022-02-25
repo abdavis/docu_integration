@@ -8,9 +8,8 @@ CREATE TABLE company_batches(
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
 ) strict;
-CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name);
+CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name) WHERE end_date IS NULL;
 CREATE INDEX company_batches_end ON company_batches(end_date);
-WHERE end_date IS NULL;
 CREATE TABLE acct_data(
     ssn integer primary key,
     primary_acct integer,
