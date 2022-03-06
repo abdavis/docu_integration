@@ -8,15 +8,10 @@ CREATE TABLE company_batches(
     start_date integer not null default(strftime('%s', 'now')),
     end_date integer
 ) strict;
-CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name) WHERE end_date IS NULL;
+CREATE UNIQUE INDEX company_batches_unique_name ON company_batches(batch_name)
+WHERE end_date IS NULL;
 CREATE INDEX company_batches_end ON company_batches(end_date);
-CREATE TABLE acct_data(
-    ssn integer primary key,
-    primary_acct integer,
-    info_codes text,
-    created_account integer,
-    host_err text
-) strict;
+CREATE TABLE acct_data(ssn integer primary key) strict;
 CREATE TABLE ssn_batch_relat(
     batch_id integer not null references company_batches(id) on delete cascade,
     ssn integer not null references acct_data(ssn) on delete cascade,
@@ -31,7 +26,11 @@ create table envelopes(
     ssn integer not null references acct_data(ssn) on delete cascade,
     status text,
     void_reason text,
-    api_err text,
+    docusign_api_err text,
+    host_api_err text,
+    info_codes text,
+    primary_account integer,
+    created_account integer,
     fname text NOT NULL,
     mname text,
     lname text NOT NULL,
@@ -48,7 +47,9 @@ create table envelopes(
     spouse_mname text,
     spouse_lname text,
     spouse_email text,
-    date_created integer not null default(strftime('%s', 'now')) -- make sure all spouse fields are empty, or fname, lname, and email are populated
+    date_created integer not null default(strftime('%s', 'now')),
+    --boolean: 0/1
+    is_married integer --make sure spouse info is all blank or filled in properly
     CHECK(
         (
             spouse_fname IS NULL
@@ -63,7 +64,7 @@ create table envelopes(
         )
     )
 ) strict;
-create index envelope_ssn on envelopes(ssn);
+create index envelope_ssn on envelopes(ssn, date_created);
 create unique index envelopes_restrict_active on envelopes(ssn)
 where status is null
     or status not in ('completed', 'declined', 'voided', 'cancelled');

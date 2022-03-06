@@ -91,14 +91,19 @@ async fn main() {
 	));
 	let db_result = rx.await;
 	println!("db write status: {db_result:?}");
-	let mut client = reqwest::Client::new();
+	let client = reqwest::Client::new();
 
 	let mut tasks = vec![];
 
-	let (processor_tx, proc_handle) =
-		batch_processor::init_batch_processor(&client, &config, &token_auth, wtx, rtx);
+	let (processor_tx, proc_handle) = batch_processor::init_batch_processor(
+		&client,
+		&config,
+		&token_auth,
+		wtx.clone(),
+		rtx.clone(),
+	);
 	tasks.push(proc_handle);
-	tasks.push(server::create_server(&config));
+	tasks.push(server::create_server(&config, &wtx, &rtx));
 
 	processor_tx.send(()).await;
 	drop(processor_tx);

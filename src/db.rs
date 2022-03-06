@@ -156,7 +156,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 						}
 					}
 
-					WriteAction::UpdateAcct(acct) => match tran.prepare_cached("UPDATE acct_data SET primary_acct = :acct_num, info_codes = :info, created_account = :new_acct, host_err = :err WHERE ssn = :ssn") {
+					WriteAction::UpdateAcct(acct) => match tran.prepare_cached("UPDATE envelopes SET primary_account = :acct_num, info_codes = :info, created_account = :new_acct, host_api_err = :err WHERE id = :env_id") {
 						Ok(mut stmt) => match stmt.execute(named_params!{":acct_num": acct.primary_acct, ":info": acct.info_codes, ":new_acct": acct.created_acct, ":err": acct.host_err, ":ssn": acct.ssn}) {
 							Ok(updates) => if updates == 1 {WriteResult::Ok(0)} else {WriteResult::Err(WFail::NoRecord)},
 							Err(_) => WriteResult::Err(WFail::DbError("Unable to execute UpdateAcct stmt".into()))
@@ -165,7 +165,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 					},
 
 					WriteAction::UpdateStatus { gid, status, void_reason, api_err } => match tran.prepare_cached(
-							"UPDATE envelopes SET status = :status, void_reason = :void_reason, api_err = :api_err WHERE gid = :gid"){
+							"UPDATE envelopes SET status = :status, void_reason = :void_reason, docusign_api_err = :api_err WHERE gid = :gid"){
 						Ok(mut stmt) => match stmt.execute(named_params!{":gid": gid, ":status": status, ":void_reason": void_reason, ":api_err": api_err}){
 							Ok(num) => if num == 1 {WriteResult::Ok(0)} else {WriteResult::Err(WFail::NoRecord)},
 							Err(_) => WriteResult::Err(WFail::DbError("Unable to update status".into()))
@@ -174,7 +174,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 					},
 
 					WriteAction::UpdateStatusWithId{ id, gid, status, api_err, void_reason } => match tran.prepare_cached(
-							"UPDATE envelopes SET gid = :gid, status = :status, api_err = :api_err, void_reason = :void_reason WHERE id = :id") {
+							"UPDATE envelopes SET gid = :gid, status = :status, docusign_api_err = :api_err, void_reason = :void_reason WHERE id = :id") {
 						Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare set gid query".into())),
 						Ok(mut stmt) => match stmt.execute(named_params!{":id": id, ":gid": gid, ":status": status, ":api_err": api_err, ":void_reason": void_reason}) {
 							Err(_) => WriteResult::Err(WFail::DbError("Unable to set gid".into())),
@@ -271,21 +271,19 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 		let _res = tx.send(match event {
 			ReadAction::ActiveBatches => {
 				match conn.prepare_cached("
-					SELECT batch.id, batch.batch_name, batch.description, batch.start_date, batch.end_date,
-					count(*),
+					SELECT batch.id, batch_name, description, start_date, end_date, count(*),
 					count(status NOT IN ('completed', 'declined', 'voided', 'cancelled') AND status IS NOT NULL),
-					count(created_account AND (status = 'completed' or ignore_error)),
-					count(host_err OR api_err OR void_reason OR status IN ('declined', 'voided', 'cancelled'))
+					count(ignore_error OR (created_account AND status = 'completed')),
+					count(NOT ignore_error AND (host_api_err OR docusign_api_err OR void_reason OR status IN ('declined', 'voided', 'cancelled')))
 					FROM company_batches batch
 					INNER JOIN ssn_batch_relat relat
 					ON batch.id = relat.batch_id
-					INNER JOIN acct_data acct
-					ON relat.ssn = acct.ssn
 					INNER JOIN (
-						SELECT ssn, status, void_reason, api_err, ROW_NUMBER() OVER(PARTITION BY ssn ORDER BY date_created) rn
+						SELECT ssn, status, void_reason, host_api_err, docusign_api_err, created_account,
+						ROW_NUMBER() OVER(PARTITION BY ssn ORDER BY date_created DESC) rn
 						FROM envelopes
 					) last_env
-					ON acct.ssn = last_env.ssn
+					ON relat.ssn = last_env.ssn
 					WHERE last_env.rn = 1
 					AND (batch.end_date IS NULL OR batch.end_date > strftime('%s', 'now') - (60*60*24*7))
 					GROUP BY batch.id, batch.batch_name, batch.description
@@ -330,25 +328,23 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 			},
 			ReadAction::BatchDetail{rowid } => {
 				match conn.prepare_cached("
-					SELECT acct_data.ssn, primary_acct, created_account, fname, mname, lname, info_codes, host_err, status, void_reason, api_err, ignore_error
-					FROM company_batches
-					INNER JOIN ssn_batch_relat
-					ON company_batches.id = ssn_batch_relat.batch_id
-					INNER JOIN acct_data
-					ON acct_data.ssn = ssn_batch_relat.ssn
+					SELECT ssn_batch_relat.ssn, primary_account, created_account, fname, mname, lname, info_codes, host_api_err, docusign_api_err, status, void_reason, ignore_error
+					FROM ssn_batch_relat
 					INNER JOIN (
-						SELECT ssn, status, void_reason, api_err, fname, mname, lname, ROW_NUMBER() OVER(PARTITION BY ssn ORDER BY date_created) rn
+						SELECT ssn, status, void_reason, host_api_err, docusign_api_err, fname, mname, lname, primary_account, created_account,
+						info_codes, ROW_NUMBER() OVER(PARTITION BY ssn ORDER BY date_created) rn
 						FROM envelopes
 					) last_env
-					ON acct_data.ssn = last_env.ssn
+					ON ssn_batch_relat.ssn = last_env.ssn
 					WHERE last_env.rn = 1
-					AND company_batches.id = :id
+					AND batch_id = :id
 					ORDER BY CASE WHEN (
-						primary_acct IS NULL
+						primary_account IS NULL
 						OR info_codes IS NOT NULL
-						OR host_err IS NOT NULL
+						OR host_api_err IS NOT NULL
+						OR docusign_api_err IS NOT NULL
 						OR status IN ('declined', 'voided', 'cancelled')
-					) THEN 0 ELSE 1 END ASC, acct_data.ssn ASC
+					) THEN 0 ELSE 1 END ASC, ssn_batch_relat.ssn ASC
 				") {
 					Err(_) => ReadResult::Err("unable to prepare batch detail query".into()),
 					Ok(mut stmt) => match stmt.query(named_params!{":id": rowid}) {
@@ -381,8 +377,8 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					Err(_) => ReadResult::Err("Unable to begin transaction for envelope details".into()),
 					Ok(tran) => match (
 						tran.prepare_cached("
-							SELECT id, gid, status, void_reason, api_err, fname, mname, lname, dob,
-								addr1, addr2, city, state, zip, email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created
+							SELECT id, gid, status, void_reason, host_api_err, docusign_api_err, info_codes, primary_account, created_account, fname, mname, lname, dob,
+								addr1, addr2, city, state, zip, email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created, is_married
 							FROM envelopes
 							WHERE ssn = :ssn
 							ORDER BY date_created DESC
@@ -413,14 +409,15 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 													match (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4), row.get(5),
 														row.get(6), row.get(7), row.get(8), row.get(9), row.get(10), row.get(11),
 														row.get(12), row.get(13), row.get(14), row.get(15), row.get(16), row.get(17),
-														row.get(18), row.get(19), row.get(20)) {
-															(Ok(id), Ok(gid), Ok(status), Ok(void_reason), Ok(api_err), Ok(first_name),Ok(middle_name), Ok(last_name), Ok(dob),
+														row.get(18), row.get(19), row.get(20), row.get(21), row.get(22), row.get(23), row.get(24), row.get(25)) {
+															(Ok(id), Ok(gid), Ok(status), Ok(void_reason), Ok(host_api_err), Ok(docusign_api_err),
+															Ok(info_codes), Ok(primary_account), Ok(created_account), Ok(first_name),Ok(middle_name), Ok(last_name), Ok(dob),
 															Ok(addr1), Ok(addr2), Ok(city), Ok(state), Ok(zip), Ok(email), Ok(phone),
-															Ok(spouse_fname), Ok(spouse_mname), Ok(spouse_lname), Ok(spouse_email), Ok(date_created)) => {
+															Ok(spouse_fname), Ok(spouse_mname), Ok(spouse_lname), Ok(spouse_email), Ok(date_created), Ok(is_married)) => {
 																let mut envelope = EnvelopeDetail {
-																	id, gid, ssn, status, void_reason, api_err, first_name, middle_name, last_name, dob,
+																	id, gid, ssn, status, void_reason, docusign_api_err, host_api_err, info_codes, primary_account, created_account, first_name, middle_name, last_name, dob,
 																	addr1, addr2, city, state, zip, email, phone,
-																	spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created,
+																	spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created, is_married,
 																	beneficiaries: vec!(), auth_users: vec!()
 																};
 																match benef_stmt.query(named_params!{":gid": envelope.gid}){
@@ -535,7 +532,8 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 												) => envelopes.push(EnvelopeDetail{
 													id, ssn, first_name, middle_name, last_name, dob, addr1, addr2, city, state, zip,
 													email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email,
-													date_created: "".into(), gid: None, status: None, void_reason: None, api_err: None,
+													date_created: "".into(), gid: None, status: None, void_reason: None,
+													docusign_api_err: None, host_api_err: None, info_codes: None, primary_account: None, created_account: None, is_married: None,
 													auth_users: vec!(), beneficiaries: vec!()
 												}),
 
@@ -683,7 +681,11 @@ pub struct EnvelopeDetail {
 	pub gid: Option<String>,
 	pub status: Option<String>,
 	pub void_reason: Option<String>,
-	pub api_err: Option<String>,
+	pub host_api_err: Option<String>,
+	pub docusign_api_err: Option<String>,
+	pub info_codes: Option<String>,
+	pub primary_account: Option<u32>,
+	pub created_account: Option<u32>,
 	pub ssn: u32,
 	pub first_name: String,
 	pub middle_name: Option<String>,
@@ -701,6 +703,7 @@ pub struct EnvelopeDetail {
 	pub spouse_lname: Option<String>,
 	pub spouse_email: Option<String>,
 	pub date_created: String,
+	pub is_married: Option<bool>,
 	pub beneficiaries: Vec<Beneficiary>,
 	pub auth_users: Vec<AuthorizedUser>
 }

@@ -2,8 +2,10 @@ use crate::db::{ReadTx, WriteAction, WriteTx};
 use ring::hmac;
 use serde::Deserialize;
 use serde_json;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task;
+use tokio::time::sleep;
 use warp::{
 	http::{self, HeaderMap},
 	hyper::{self, body::Bytes},
@@ -28,11 +30,8 @@ async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
 			let key = key.clone();
 			let wtx = wtx.clone();
 			async move {
-				match verify_msg(&key, &headers, &bytes) {
-					Ok(_) => {
-						println!("Message is Valid!");
-						process_msg(bytes, wtx).await
-					}
+				match verify_msg(&key, &headers, &bytes).await {
+					Ok(_) => process_msg(bytes, wtx).await,
 					Err(string) => {
 						println!("{string}");
 						http::StatusCode::UNAUTHORIZED.into_response()
@@ -157,10 +156,9 @@ struct Radio {
 	value: String,
 	selected: String,
 }
-fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Result<(), String> {
+async fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Result<(), String> {
+	let const_time_complete = sleep(Duration::from_secs(5));
 	let calculated_tag = base64::encode(hmac::sign(key, bytes));
-	println!("calculated_tag: {calculated_tag}");
-	println!("webhook headers: {headers:?}");
 	for n in 1..101 {
 		match headers.get(format!("X-DocuSign-Signature-{n}")) {
 			None => return Err("hmac authentication codes are invalid or missing".into()),
@@ -170,9 +168,10 @@ fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Result<(),
 						return Ok(());
 					}
 				}
-				Err(_) => return Err("unable to parse header tag".into()),
+				Err(_) => break,
 			},
 		}
 	}
-	Err("all 100 provided hmac authentication codes are invalid".into())
+	const_time_complete.await;
+	Err("Invald HMAC Authentication Code".into())
 }
