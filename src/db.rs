@@ -2,6 +2,7 @@ use crossbeam_channel;
 use rusqlite::{config::DbConfig, named_params, Connection, OpenFlags, ffi::{Error as SqliteError}};
 use std::thread;
 use tokio::sync::oneshot;
+use serde::Deserialize;
 
 const READ_THREADS: usize = 4;
 const WRITE_CHANNEL_SIZE: usize = 100;
@@ -51,15 +52,11 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 				let mut dups = 0;
 
 				 match match event {
-					WriteAction::NewBatch {
-						batch_name,
-						description,
-						records,
-					} => {
+					WriteAction::NewBatch (batch_data) => {
 						match tran.prepare_cached("INSERT INTO company_batches (batch_name, description) VALUES (:name, :desc)") {
 							Err(_) => WriteResult::Err(WFail::DbError("Prepare Company Batches Failed".into())),
 							Ok(mut stmt) => {
-								match stmt.insert(named_params! {":name": batch_name, ":desc": description}){
+								match stmt.insert(named_params! {":name": batch_data.name, ":desc": batch_data.description}){
 									//Duplicate insert path
 									Err(rusqlite::Error::SqliteFailure(SqliteError{ code: _, extended_code: 2067 }, _)) => {WriteResult::Err(WFail::Duplicate)},
 									//All other errors
@@ -77,7 +74,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 												let closure = ||{
 													let mut dups = 0;
 
-													for record in records{
+													for record in batch_data.records{
 														if let Err(error) = acct_ins.execute(named_params!{":ssn": record.ssn}){
 															if let rusqlite::Error::SqliteFailure(SqliteError{code: _, extended_code}, _) = error {
 																if extended_code == 2067 || extended_code == 1555{
@@ -287,7 +284,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					WHERE last_env.rn = 1
 					AND (batch.end_date IS NULL OR batch.end_date > strftime('%s', 'now') - (60*60*24*7))
 					GROUP BY batch.id, batch.batch_name, batch.description
-					ORDER BY batch.end_date DESC NULLS FIRST, batch.id DESC
+					ORDER BY batch.id
 				") {
 					Err(_) => ReadResult::Err("Unable to prepare active batches query".into()),
 					Ok(mut active_stmt) => {
@@ -338,13 +335,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					ON ssn_batch_relat.ssn = last_env.ssn
 					WHERE last_env.rn = 1
 					AND batch_id = :id
-					ORDER BY CASE WHEN (
-						primary_account IS NULL
-						OR info_codes IS NOT NULL
-						OR host_api_err IS NOT NULL
-						OR docusign_api_err IS NOT NULL
-						OR status IN ('declined', 'voided', 'cancelled')
-					) THEN 0 ELSE 1 END ASC, ssn_batch_relat.ssn ASC
+					ORDER BY ssn
 				") {
 					Err(_) => ReadResult::Err("unable to prepare batch detail query".into()),
 					Ok(mut stmt) => match stmt.query(named_params!{":id": rowid}) {
@@ -381,7 +372,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 								addr1, addr2, city, state, zip, email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created, is_married
 							FROM envelopes
 							WHERE ssn = :ssn
-							ORDER BY date_created DESC
+							ORDER BY id
 						"),
 						tran.prepare_cached("
 							SELECT type, name, address, city_state_zip, dob, relationship, ssn, percent
@@ -557,11 +548,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 }
 
 pub enum WriteAction {
-	NewBatch {
-		batch_name: String,
-		description: String,
-		records: Vec<CsvImport>,
-	},
+	NewBatch (BatchData),
 
 	UpdateAcct(Acct),
 
@@ -706,9 +693,13 @@ pub struct EnvelopeDetail {
 	pub is_married: Option<bool>,
 	pub beneficiaries: Vec<Beneficiary>,
 	pub auth_users: Vec<AuthorizedUser>
+}#[derive(Deserialize)]
+pub struct BatchData {
+	name: String,
+	description: String,
+	records: Vec<CsvImport>
 }
-
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
 pub struct CsvImport {
 	pub ssn: u32,
 	pub first_name: String,
@@ -724,7 +715,7 @@ pub struct CsvImport {
 	pub phone: String,
 	pub spouse: Option<Spouse>,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
 pub struct Spouse {
 	pub first_name: String,
 	pub middle_name: Option<String>,
