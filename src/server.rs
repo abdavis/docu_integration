@@ -1,4 +1,4 @@
-use crate::db::{ReadTx, WriteAction, WriteTx};
+use crate::db::{self, ReadTx, WFail, WriteAction, WriteTx};
 use ring::hmac;
 use serde::Deserialize;
 use serde_json;
@@ -20,15 +20,18 @@ pub fn create_server(config: &crate::Config, wtx: &WriteTx, rtx: &ReadTx) -> tas
 }
 async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
 	println!("Building server");
+
 	let key = hmac::Key::new(hmac::HMAC_SHA256, config.docusign.hmac_key.as_bytes());
+	let wtx_webhook = wtx.clone();
 	let webhook = warp::path("webhook")
+		.and(warp::path::end())
 		.and(warp::post())
-		.and(warp::body::content_length_limit(4194304))
+		.and(warp::body::content_length_limit(1024 * 32))
 		.and(warp::header::headers_cloned())
 		.and(warp::body::bytes())
 		.then(move |headers: HeaderMap, bytes: Bytes| {
 			let key = key.clone();
-			let wtx = wtx.clone();
+			let wtx = wtx_webhook.clone();
 			async move {
 				match verify_msg(&key, &headers, &bytes).await {
 					Ok(_) => process_msg(bytes, wtx).await,
@@ -40,7 +43,42 @@ async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
 			}
 		});
 
-	warp::serve(webhook)
+	let new_batch = warp::path("batches")
+		.and(warp::path::end())
+		.and(warp::post())
+		.and(warp::body::content_length_limit(1024 * 32))
+		.and(warp::body::json())
+		.then(move |batch: db::BatchData| {
+			let wtx = wtx.clone();
+			async move {
+				let (tx, rx) = oneshot::channel();
+				wtx.send((WriteAction::NewBatch(batch), tx)).ok();
+				match rx.await {
+					Err(_) => warp::reply::with_status(
+						warp::reply(),
+						http::StatusCode::INTERNAL_SERVER_ERROR,
+					)
+					.into_response(),
+					Ok(result) => match result {
+						Ok(dups) => format!("{{\"duplicates\":{dups}").into_response(),
+						Err(err) => match err {
+							WFail::Duplicate => warp::reply::with_status(
+								"Batch name is a duplicate.",
+								http::StatusCode::UNPROCESSABLE_ENTITY,
+							)
+							.into_response(),
+							_ => warp::reply::with_status(
+								warp::reply(),
+								http::StatusCode::INTERNAL_SERVER_ERROR,
+							)
+							.into_response(),
+						},
+					},
+				}
+			}
+		});
+
+	warp::serve(webhook.or(new_batch))
 		.tls()
 		.cert_path("cert/cert.pem")
 		.key_path("cert/key.pem")
@@ -53,15 +91,15 @@ async fn process_msg(bytes: Bytes, wtx: WriteTx) -> http::Response<hyper::Body> 
 	match serde_json::from_slice::<Msg>(&bytes) {
 		Err(_) => {
 			println!("Unable to parse Json");
-			warp::reply::with_status(warp::reply(), http::StatusCode::INTERNAL_SERVER_ERROR)
+			warp::reply::with_status("Unable to parse Json", http::StatusCode::BAD_REQUEST)
 				.into_response()
 		}
 		Ok(msg) => {
 			let (tx, rx) = oneshot::channel();
 			if let "envelope-completed" = msg.event.as_str() {
-				wtx.send((msg.to_db_complete(), tx));
+				wtx.send((msg.to_db_complete(), tx)).ok();
 			} else {
-				wtx.send((msg.to_db_update(), tx));
+				wtx.send((msg.to_db_update(), tx)).ok();
 			}
 			match rx.await {
 				Err(_) => {
@@ -69,7 +107,7 @@ async fn process_msg(bytes: Bytes, wtx: WriteTx) -> http::Response<hyper::Body> 
 					http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
 				}
 				Ok(write_result) => match write_result {
-					Err(fail) => warp::reply::with_status(
+					Err(_) => warp::reply::with_status(
 						warp::reply(),
 						http::StatusCode::INTERNAL_SERVER_ERROR,
 					)
