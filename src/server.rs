@@ -99,7 +99,8 @@ async fn server(
 						channel: connect(socket),
 						resource: Resource::Main,
 					})
-					.await;
+					.await
+					.unwrap_or_default();
 			})
 		});
 

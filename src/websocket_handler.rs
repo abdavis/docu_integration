@@ -46,7 +46,7 @@ pub async fn connector_task(
 					Err(_) => {println!("Exiting connecter loop, close_rx channel is closed"); break},
 					Ok(new_connect) => {
 						let (updater_tx, _updater_rx) = map.entry(new_connect.resource).or_insert({
-							let (tx, rx) = async_channel::bounded(5);
+							let (tx, rx) = async_channel::bounded(100);
 							task::spawn({
 								let rx = rx.clone();
 								let db_rtx = db_rtx.clone();
@@ -142,12 +142,12 @@ async fn updater_task(
 										Err(_) => {println!("Exiting updater loop, db update channel is closed"); break UpdaterCloseMsg{resource, leftover: None}},
 										Ok(_) => {
 											let (tx, rx) = oneshot::channel();
-											db_reader_channel.send((read_query.clone(), tx)).unwrap_or(());
+											db_reader_channel.send((read_query.clone(), tx)).unwrap_or_default();
 											match rx.await {
 												Ok(Ok(res)) => match serde_json::to_string(&res) {
 													Ok(str) => {
 														json_state = str;
-														updater_tx.send(json_state.clone()).unwrap_or(0);
+														updater_tx.send(json_state.clone()).unwrap_or_default();
 													}
 													Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
 												}
@@ -173,10 +173,19 @@ async fn updater_task(
 							}
 						})
 						.await
-						.unwrap_or(());
+						.unwrap_or_default();
 					}
 				}
-				anything_else => println!("{anything_else:?}"),
+				result => {
+					println!("error in updater task when reading from db: {result:?}");
+					close_channel
+						.send(UpdaterCloseMsg {
+							resource,
+							leftover: None,
+						})
+						.await
+						.unwrap_or_default();
+				}
 			}
 		} else {
 			close_channel
