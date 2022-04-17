@@ -9,6 +9,7 @@ mod batch_processor;
 mod db;
 mod oauth;
 mod server;
+mod websocket_handler;
 
 #[tokio::main]
 async fn main() {
@@ -18,7 +19,7 @@ async fn main() {
 
 	let mut token_auth = oauth::auth_initiate(&config);
 
-	let (wtx, rtx, handles) = db::init();
+	let (wtx, rtx, db_update_tx, handles) = db::init();
 	//let (tx, rx) = oneshot::channel();
 	// wtx.send((
 	// 	db::WriteAction::NewBatch {

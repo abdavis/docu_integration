@@ -1,8 +1,8 @@
 use crossbeam_channel;
 use rusqlite::{config::DbConfig, named_params, Connection, OpenFlags, ffi::{Error as SqliteError}};
 use std::thread;
-use tokio::sync::oneshot;
-use serde::Deserialize;
+use tokio::sync::{oneshot, broadcast};
+use serde::{Deserialize, Serialize};
 
 const READ_THREADS: usize = 4;
 const WRITE_CHANNEL_SIZE: usize = 100;
@@ -14,11 +14,14 @@ pub type ReadTx = crossbeam_channel::Sender<(ReadAction, oneshot::Sender<ReadRes
 pub fn init() -> (
 	crossbeam_channel::Sender<(WriteAction, oneshot::Sender<WriteResult>)>,
 	crossbeam_channel::Sender<(ReadAction, oneshot::Sender<ReadResult>)>,
+	broadcast::Sender<()>,
 	Vec<thread::JoinHandle<()>>,
 ) {
 	let (wtx, wrx) = crossbeam_channel::bounded(WRITE_CHANNEL_SIZE);
+	let (update_sender, _) = broadcast::channel(1000);
 	let mut handles = vec![];
-	handles.push(thread::spawn(|| database_writer(wrx)));
+	let update_sender_copy = update_sender.clone();
+	handles.push(thread::spawn(|| database_writer(wrx, update_sender)));
 
 	let (rtx, rrx) = crossbeam_channel::bounded(READ_CHANNEL_SIZE);
 	for _n in 0..READ_THREADS {
@@ -26,10 +29,10 @@ pub fn init() -> (
 		handles.push(thread::spawn(|| database_reader(rrx)))
 	}
 
-	(wtx, rtx, handles)
+	(wtx, rtx, update_sender_copy, handles)
 }
 
-fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender<WriteResult>)>) {
+fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender<WriteResult>)>, update_tx: broadcast::Sender<()>) {
 	let mut conn = Connection::open_with_flags(
 		"db.sqlite3",
 		OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -72,7 +75,6 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 											(Ok(mut acct_ins), Ok(mut relat_ins), Ok(mut envl_ins)) => {
 												//wrap loop inside closure so we can return early
 												let closure = ||{
-													let mut dups = 0;
 
 													for record in batch_data.records{
 														if let Err(error) = acct_ins.execute(named_params!{":ssn": record.ssn}){
@@ -238,7 +240,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 					}
 				} {
 					Ok(_) => match tran.commit() {
-						Ok(_) => {tx.send(WriteResult::Ok(dups));},
+						Ok(_) => {tx.send(WriteResult::Ok(dups)); update_tx.send(());},
 						Err(_) => {tx.send(WriteResult::Err(WFail::DbError("unable to commit write transaction".into())));}
 					},
 					Err(val) => {tx.send(WriteResult::Err(val));}
@@ -576,6 +578,7 @@ pub enum WriteAction {
 	}
 }
 
+#[derive(Serialize)]
 pub struct Beneficiary {
 	pub kind: BeneficiaryType,
 	pub name: String,
@@ -586,6 +589,8 @@ pub struct Beneficiary {
 	pub ssn: u32,
 	pub percent: u32
 }
+
+#[derive(Serialize)]
 pub enum BeneficiaryType {
 	Primary,
 	Contingent,
@@ -614,6 +619,7 @@ fn column_result( value: rusqlite::types::ValueRef<'_>) -> std::result::Result<S
 	Err(rusqlite::types::FromSqlError::InvalidType)
 }
 }
+#[derive(Serialize)]
 pub struct AuthorizedUser {
 	pub name: String,
 	pub dob: String
@@ -629,6 +635,7 @@ pub enum WFail {
 	DbError(String),
 }
 
+#[derive(Clone)]
 pub enum ReadAction {
 	ActiveBatches,
 	//rowid for batch detail
@@ -640,6 +647,8 @@ pub enum ReadAction {
 }
 
 pub type ReadResult = Result<RSuccess, String>;
+
+#[derive(Serialize)]
 pub enum RSuccess {
 	ActiveBatches(Vec<BatchSummary>),
 	BatchDetails(Vec<BatchDetail>),
@@ -648,6 +657,7 @@ pub enum RSuccess {
 	PdfBlob(Vec<u8>)
 }
 
+#[derive(Serialize)]
 pub struct BatchDetail {
 	pub ssn: u32,
 	pub primary_acct: u32,
@@ -663,6 +673,7 @@ pub struct BatchDetail {
 	pub ignore_error: bool
 }
 
+#[derive(Serialize)]
 pub struct EnvelopeDetail {
 	pub id: i64,
 	pub gid: Option<String>,
@@ -731,6 +742,7 @@ pub struct Acct {
 	pub host_err: Option<String>,
 }
 
+#[derive(Serialize)]
 pub struct BatchSummary {
 	pub id: i64,
 	pub name: String,
