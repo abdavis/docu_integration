@@ -578,7 +578,7 @@ pub enum WriteAction {
 	}
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Beneficiary {
 	pub kind: BeneficiaryType,
 	pub name: String,
@@ -590,7 +590,7 @@ pub struct Beneficiary {
 	pub percent: u32
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub enum BeneficiaryType {
 	Primary,
 	Contingent,
@@ -619,7 +619,7 @@ fn column_result( value: rusqlite::types::ValueRef<'_>) -> std::result::Result<S
 	Err(rusqlite::types::FromSqlError::InvalidType)
 }
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct AuthorizedUser {
 	pub name: String,
 	pub dob: String
@@ -648,7 +648,7 @@ pub enum ReadAction {
 
 pub type ReadResult = Result<RSuccess, String>;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub enum RSuccess {
 	ActiveBatches(Vec<BatchSummary>),
 	BatchDetails(Vec<BatchDetail>),
@@ -657,7 +657,7 @@ pub enum RSuccess {
 	PdfBlob(Vec<u8>)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BatchDetail {
 	pub ssn: u32,
 	pub primary_acct: u32,
@@ -673,7 +673,7 @@ pub struct BatchDetail {
 	pub ignore_error: bool
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct EnvelopeDetail {
 	pub id: i64,
 	pub gid: Option<String>,
@@ -706,9 +706,9 @@ pub struct EnvelopeDetail {
 	pub auth_users: Vec<AuthorizedUser>
 }#[derive(Deserialize)]
 pub struct BatchData {
-	name: String,
-	description: String,
-	records: Vec<CsvImport>
+	pub name: String,
+	pub description: String,
+	pub records: Vec<CsvImport>
 }
 #[derive(Clone, Deserialize)]
 pub struct CsvImport {
@@ -742,13 +742,13 @@ pub struct Acct {
 	pub host_err: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BatchSummary {
 	pub id: i64,
 	pub name: String,
 	pub description: String,
 	pub start_date: u32,
-	pub end_date: u32,
+	pub end_date: Option<u32>,
 	pub total: u32,
 	pub working: u32,
 	pub complete: u32,

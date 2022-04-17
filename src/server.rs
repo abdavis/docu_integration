@@ -1,4 +1,5 @@
 use crate::db::{self, ReadTx, WFail, WriteAction, WriteTx};
+use crate::websocket_handler::{self, connect, ConnectorMsg, Resource};
 use ring::hmac;
 use serde::Deserialize;
 use serde_json;
@@ -12,17 +13,27 @@ use warp::{
 	Filter, Reply,
 };
 
-pub fn create_server(config: &crate::Config, wtx: &WriteTx, rtx: &ReadTx) -> task::JoinHandle<()> {
+pub fn create_server(
+	config: &crate::Config,
+	db_wtx: &WriteTx,
+	db_rtx: &ReadTx,
+	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
+) -> task::JoinHandle<()> {
 	let config = config.clone();
-	let wtx = wtx.clone();
-	let rtx = rtx.clone();
-	task::spawn(async move { server(config, wtx, rtx).await })
+	let wtx = db_wtx.clone();
+	let rtx = db_rtx.clone();
+	task::spawn(async move { server(config, wtx, rtx, ws_handler_tx).await })
 }
-async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
+async fn server(
+	config: crate::Config,
+	db_wtx: WriteTx,
+	db_rtx: ReadTx,
+	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
+) {
 	println!("Building server");
 
 	let key = hmac::Key::new(hmac::HMAC_SHA256, config.docusign.hmac_key.as_bytes());
-	let wtx_webhook = wtx.clone();
+	let wtx_webhook = db_wtx.clone();
 	let webhook = warp::path("webhook")
 		.and(warp::path::end())
 		.and(warp::post())
@@ -49,7 +60,7 @@ async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
 		.and(warp::body::content_length_limit(1024 * 32))
 		.and(warp::body::json())
 		.then(move |batch: db::BatchData| {
-			let wtx = wtx.clone();
+			let wtx = db_wtx.clone();
 			async move {
 				let (tx, rx) = oneshot::channel();
 				wtx.send((WriteAction::NewBatch(batch), tx)).ok();
@@ -78,11 +89,24 @@ async fn server(config: crate::Config, wtx: WriteTx, rtx: ReadTx) {
 			}
 		});
 
-	warp::serve(webhook.or(new_batch))
-		.tls()
-		.cert_path("cert/cert.pem")
-		.key_path("cert/key.pem")
-		.run(([0, 0, 0, 0], 443))
+	let websocket_filter = warp::ws()
+		.and(warp::path::end())
+		.map(move |ws: warp::ws::Ws| {
+			let ws_handler_tx = ws_handler_tx.clone();
+			ws.on_upgrade(move |socket| async move {
+				ws_handler_tx
+					.send(ConnectorMsg {
+						channel: connect(socket),
+						resource: Resource::Main,
+					})
+					.await;
+			})
+		});
+
+	let hello = warp::any().map(|| "Hello World");
+
+	warp::serve(webhook.or(new_batch).or(websocket_filter).or(hello))
+		.run(([127, 0, 0, 1], 8081))
 		.await;
 
 	println!("Shutting down Server");
