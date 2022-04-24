@@ -271,9 +271,10 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 			ReadAction::ActiveBatches => {
 				match conn.prepare_cached("
 					SELECT batch.id, batch_name, description, start_date, end_date, count(*),
-					count(status NOT IN ('completed', 'declined', 'voided', 'cancelled') AND status IS NOT NULL),
-					count(ignore_error OR (created_account AND status = 'completed')),
-					count(NOT ignore_error AND (host_api_err OR docusign_api_err OR void_reason OR status IN ('declined', 'voided', 'cancelled')))
+					count(CASE WHEN status NOT IN ('completed', 'declined', 'voided', 'cancelled') AND status IS NOT NULL THEN 1 ELSE NULL END),
+					count(CASE WHEN ignore_error OR (created_account AND status = 'completed') THEN 1 ELSE NULL END),
+					count(CASE WHEN NOT ignore_error AND (host_api_err OR docusign_api_err OR void_reason OR status IN ('declined', 'voided', 'cancelled'))
+						THEN 1 ELSE NULL END)
 					FROM company_batches batch
 					INNER JOIN ssn_batch_relat relat
 					ON batch.id = relat.batch_id
