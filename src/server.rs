@@ -54,7 +54,7 @@ async fn server(
 			}
 		});
 
-	let new_batch = warp::path("batches")
+	let new_batch = warp::path("batch")
 		.and(warp::path::end())
 		.and(warp::post())
 		.and(warp::body::content_length_limit(1024 * 32))
@@ -89,8 +89,11 @@ async fn server(
 			}
 		});
 
-	let websocket_filter = warp::ws()
-		.and(warp::path::end())
+	let ws_handler_2 = ws_handler_tx.clone();
+	let ws_handler_3 = ws_handler_tx.clone();
+
+	let websocket_main = warp::path::end()
+		.and(warp::ws())
 		.map(move |ws: warp::ws::Ws| {
 			let ws_handler_tx = ws_handler_tx.clone();
 			ws.on_upgrade(move |socket| async move {
@@ -103,6 +106,39 @@ async fn server(
 					.unwrap_or_default();
 			})
 		});
+
+	let websocket_batch =
+		warp::path!("batch" / i64)
+			.and(warp::ws())
+			.map(move |batch_id, ws: warp::ws::Ws| {
+				let ws_handler_tx = ws_handler_2.clone();
+				ws.on_upgrade(move |socket| async move {
+					let result = ws_handler_tx
+						.send(ConnectorMsg {
+							channel: connect(socket),
+							resource: Resource::Batch(batch_id),
+						})
+						.await;
+				})
+			});
+
+	let websocket_individual =
+		warp::path!("individual" / u32)
+			.and(warp::ws())
+			.map(move |ssn, ws: warp::ws::Ws| {
+				let ws_handler_tx = ws_handler_3.clone();
+				ws.on_upgrade(move |socket| async move {
+					ws_handler_tx
+						.send(ConnectorMsg {
+							channel: connect(socket),
+							resource: Resource::Individual(ssn),
+						})
+						.await
+						.unwrap_or_default();
+				})
+			});
+
+	let websocket_filter = websocket_main.or(websocket_batch).or(websocket_individual);
 
 	let hello = warp::any().map(|| "Hello World");
 

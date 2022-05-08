@@ -1,4 +1,4 @@
-use crate::db::{self, RSuccess, ReadAction};
+use crate::db::{self, ReadAction};
 use futures::prelude::*;
 use rand::{thread_rng, Rng};
 use serde_json;
@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot};
 use tokio::task;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep_until, Duration, Instant};
 use warp::ws::{Message, WebSocket};
 pub struct ConnectorMsg {
 	pub channel: oneshot::Sender<DbUpdater>,
 	pub resource: Resource,
 }
-
-const KEEPALIVE_INTERVAL: u64 = 30;
+// ping interval, in seconds
+const PING_INTERVAL: u64 = 600;
 pub struct DbUpdater {
 	receive_channel: broadcast::Receiver<String>,
 	initial_json: String,
@@ -188,6 +188,7 @@ async fn updater_task(
 				}
 			}
 		} else {
+			println!("error sending action to db");
 			close_channel
 				.send(UpdaterCloseMsg {
 					resource,
@@ -209,19 +210,44 @@ pub fn connect(ws: WebSocket) -> oneshot::Sender<DbUpdater> {
 		if let Ok(mut database_updates) = orx.await {
 			let (mut tx, mut rx) = ws.split();
 			if let Ok(_) = tx.send(Message::text(database_updates.initial_json)).await {
+				let mut ping_deadline = Instant::now()
+					+ Duration::from_millis(
+						PING_INTERVAL * 1000 + thread_rng().gen_range(0..(PING_INTERVAL * 500)),
+					);
+
+				let mut pong_deadline = Instant::now() + Duration::from_secs(PING_INTERVAL * 2);
+
 				loop {
-					println!("connection loop");
 					tokio::select! {
 						update = database_updates.receive_channel.recv() => {
 							match update {
-								Err(_) => {println!("exiting connect loop since updater channel is closed");break},
-								Ok(s) => if let Err(_) = tx.send(Message::text(s)).await {println!("exiting connect loop from send error");break}
+								Err(_) => break,
+								Ok(s) => if let Err(_) = tx.send(Message::text(s)).await {break}
 							}
 						}
-						ws_receive = rx.next() => {if let None = ws_receive {println!("exiting connect loop from receiv error");break}}
 
-						_ = sleep(Duration::from_millis(KEEPALIVE_INTERVAL * 1000 + thread_rng().gen_range(0..(KEEPALIVE_INTERVAL * 500))))
-							=> {if let Err(_) = tx.send(Message::ping([])).await {println!("exiting connect loop from timeout");break}}
+						ws_receive = rx.next() => {
+							match ws_receive {
+								None => {println!("Websocked receiver closed"); break},
+								Some(Ok(msg)) => if msg.is_pong() {pong_deadline = Instant::now() + Duration::from_secs(PING_INTERVAL * 2);},
+								_=>()
+							}
+						}
+
+						_ = sleep_until(ping_deadline)
+							=> {
+								if let Err(_) = tx.send(Message::ping([])).await {
+									println!("exiting connect loop from timeout");
+									break
+								}
+								ping_deadline = Instant::now()
+									+ Duration::from_millis(
+										PING_INTERVAL * 1000
+											+ thread_rng().gen_range(0..(PING_INTERVAL * 500)),
+									);
+							}
+
+						_= sleep_until(pong_deadline) => {println!("No pong received"); break}
 					}
 				}
 			}

@@ -13,6 +13,30 @@ socket.onclose = function () {
 }
 socket.onmessage = function (event) { console.log(event.data) }
 
+let batch_socket = new WebSocket("ws://localhost:8081/batch/1");
+batch_socket.onopen = function () {
+  console.log("Connection Established");
+}
+batch_socket.onmessage = function (event) { console.log(event.data); }
+batch_socket.onerror = function () {
+  console.error("ws error");
+}
+batch_socket.onclose = function () {
+  console.log("ws closed");
+}
+
+let individual_socket = new WebSocket("ws://localhost:8081/individual/12345610");
+individual_socket.onopen = function () {
+  console.log("Connection Established");
+}
+individual_socket.onmessage = function (event) { console.log(event.data); }
+individual_socket.onerror = function () {
+  console.error("ws error");
+}
+individual_socket.onclose = function () {
+  console.log("ws closed");
+}
+
 </script>
 
 <template>

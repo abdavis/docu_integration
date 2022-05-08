@@ -338,7 +338,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					ON ssn_batch_relat.ssn = last_env.ssn
 					WHERE last_env.rn = 1
 					AND batch_id = :id
-					ORDER BY ssn
+					ORDER BY ssn_batch_relat.ssn
 				") {
 					Err(_) => ReadResult::Err("unable to prepare batch detail query".into()),
 					Ok(mut stmt) => match stmt.query(named_params!{":id": rowid}) {
@@ -351,10 +351,10 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 										Err(_) => {return ReadResult::Err("Error during active batches read".into());}
 										Ok(None) => {break;},
 										Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4), row.get(5), row.get(6), row.get(7), row.get(8), row.get(9), row.get(10), row.get(11)) {
-											(Ok(ssn), Ok(primary_acct), Ok(created_account), Ok(fname), Ok(mname), Ok(lname), Ok(info_codes), Ok(host_err), Ok(status), Ok(void_reason), Ok(api_err), Ok(ignore_error)) => {
+											(Ok(ssn), Ok(primary_acct), Ok(created_account), Ok(fname), Ok(mname), Ok(lname), Ok(info_codes), Ok(host_err), Ok(api_err), Ok(status), Ok(void_reason), Ok(ignore_error)) => {
 												details.push(BatchDetail{ssn, primary_acct, created_account, fname, mname, lname, info_codes, host_err, status, void_reason, api_err, ignore_error})
 											},
-											_ => return ReadResult::Err("Error during read loop".into())
+											foo => {println!("{foo:?}"); return ReadResult::Err("Error during read loop".into())}
 										}
 									}
 								}
@@ -499,7 +499,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 			ReadAction::NewEnvelopes => {
 				match conn.prepare_cached("
 				SELECT id, ssn, fname, mname, lname, dob, addr1, addr2, city, state, zip,
-					email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email
+					email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email, date_created
 				FROM envelopes
 				WHERE gid IS NULL AND status IS NULL
 				") {
@@ -517,16 +517,16 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 											Ok(Some(row)) => match (
 												row.get(0), row.get(1), row.get(2), row.get(3), row.get(4), row.get(5), row.get(6),
 												row.get(7), row.get(8), row.get(9), row.get(10), row.get(11), row.get(12),
-												row.get(13), row.get(14), row.get(15), row.get(16)
+												row.get(13), row.get(14), row.get(15), row.get(16), row.get(17)
 											) {
 												(
 													Ok(id), Ok(ssn), Ok(first_name), Ok(middle_name), Ok(last_name), Ok(dob), Ok(addr1),
 													Ok(addr2), Ok(city), Ok(state), Ok(zip), Ok(email), Ok(phone), Ok(spouse_fname),
-													Ok(spouse_mname),Ok(spouse_lname), Ok(spouse_email)
+													Ok(spouse_mname),Ok(spouse_lname), Ok(spouse_email), Ok(date_created)
 												) => envelopes.push(EnvelopeDetail{
 													id, ssn, first_name, middle_name, last_name, dob, addr1, addr2, city, state, zip,
 													email, phone, spouse_fname, spouse_mname, spouse_lname, spouse_email,
-													date_created: "".into(), gid: None, status: None, void_reason: None,
+													date_created, gid: None, status: None, void_reason: None,
 													docusign_api_err: None, host_api_err: None, info_codes: None, primary_account: None, created_account: None, is_married: None,
 													auth_users: vec!(), beneficiaries: vec!()
 												}),
@@ -661,16 +661,16 @@ pub enum RSuccess {
 #[derive(Serialize, Debug)]
 pub struct BatchDetail {
 	pub ssn: u32,
-	pub primary_acct: u32,
-	pub created_account: u32,
+	pub primary_acct: Option<u32>,
+	pub created_account: Option<u32>,
 	pub fname: String,
 	pub mname: Option<String>,
 	pub lname: String,
-	pub info_codes: String,
-	pub host_err: String,
-	pub status: String,
-	pub void_reason: String,
-	pub api_err: String,
+	pub info_codes: Option<String>,
+	pub host_err: Option<String>,
+	pub status: Option<String>,
+	pub void_reason: Option<String>,
+	pub api_err: Option<String>,
 	pub ignore_error: bool
 }
 
@@ -701,7 +701,7 @@ pub struct EnvelopeDetail {
 	pub spouse_mname: Option<String>,
 	pub spouse_lname: Option<String>,
 	pub spouse_email: Option<String>,
-	pub date_created: String,
+	pub date_created: i64,
 	pub is_married: Option<bool>,
 	pub beneficiaries: Vec<Beneficiary>,
 	pub auth_users: Vec<AuthorizedUser>
