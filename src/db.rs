@@ -238,6 +238,38 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 
 						}
 					}
+					WriteAction::CreateUser(user) => {
+						match tran.prepare_cached("INSERT INTO users (id, email, phc_passwd, reset_required, admin) VALUES (:id, :email, :phc_hash, :reset_required, :admin)"){
+							Ok(mut user_insert) => match user_insert.execute(named_params!{
+								":id": user.id,
+								":email": user.email,
+								":phc_hash": user.phc_hash,
+								":reset_required": user.reset_required,
+								":admin": user.admin
+							}){
+								Ok(_) => WriteResult::Ok(0),
+								Err(_) => WriteResult::Err(WFail::DbError("Unable to insert into users table".into()))
+
+							},
+							Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user insert query".into()))
+						}
+					}
+					WriteAction::UpdateUser(user) => {
+						match tran.prepare_cached("UPDATE users SET email = :email, phc_passwd = :phc_hash, reset_required = :reset_required, admin = :admin
+							WHERE id = :id"){
+								Ok(mut user_update) => match user_update.execute(named_params!{
+									":id": user.id,
+									":email": user.email,
+									":phc_hash": user.phc_hash,
+									":reset_required": user.reset_required,
+									":admin": user.admin
+								}){
+									Ok(_) => WriteResult::Ok(0),
+									Err(_) => WriteResult::Err(WFail::DbError("Unable to update user".into()))
+								},
+								Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user update stmt".into()))
+							}
+					}
 				} {
 					Ok(_) => match tran.commit() {
 						Ok(_) => {tx.send(WriteResult::Ok(dups)); update_tx.send(());},
@@ -546,6 +578,25 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 				}
 			}
 
+			ReadAction::GetUser { user_id } => {
+				match conn.prepare_cached("SELECT email, phc_passwd, reset_required, admin FROM users WHERE id = :id"){
+					Err(_) => Err("Unable to prepare get user stmt".into()),
+					Ok(mut get_usr_stmt) => match get_usr_stmt.query(named_params!{":id": user_id}){
+						Err(_) => Err("Unable to query get user stmt".into()),
+						Ok(mut rows) => match rows.next() {
+							Err(_) => Err("Unable to get user".into()),
+							Ok(None) => Ok(RSuccess::User(None)),
+							Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3)){
+								(Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) => {
+									Ok(RSuccess::User(Some(crate::login_handler::User {id: user_id, email, phc_hash, reset_required, admin})))
+								}
+								_ => Err("type conversion error while getting user".into())
+							}
+						}
+					}
+				}
+			}
+
 		});
 	}
 }
@@ -576,7 +627,11 @@ pub enum WriteAction {
 		beneficiaries: Vec<Beneficiary>,
 		authorized_users: Vec<AuthorizedUser>,
 		pdf: Vec<u8>
-	}
+	},
+
+	CreateUser(crate::login_handler::User),
+
+	UpdateUser(crate::login_handler::User)
 }
 
 #[derive(Serialize, Debug)]
@@ -644,7 +699,8 @@ pub enum ReadAction {
 	//ssn for individual detail
 	EnvelopeDetail{ssn:u32},
 	FetchPdf{gid: String},
-	NewEnvelopes
+	NewEnvelopes,
+	GetUser{user_id: String}
 }
 
 pub type ReadResult = Result<RSuccess, String>;
@@ -655,7 +711,8 @@ pub enum RSuccess {
 	BatchDetails(Vec<BatchDetail>),
 	EnvelopeDetails(Vec<EnvelopeDetail>),
 	OldBatches(Vec<BatchSummary>),
-	PdfBlob(Vec<u8>)
+	PdfBlob(Vec<u8>),
+	User(Option<crate::login_handler::User>)
 }
 
 #[derive(Serialize, Debug)]

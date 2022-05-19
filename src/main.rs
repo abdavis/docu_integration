@@ -9,6 +9,7 @@ use crate::db::BatchDetail;
 
 mod batch_processor;
 mod db;
+mod login_handler;
 mod oauth;
 mod server;
 mod websocket_handler;
