@@ -5,8 +5,8 @@ use tokio::sync::{oneshot, broadcast};
 use serde::{Deserialize, Serialize};
 
 const READ_THREADS: usize = 4;
-const WRITE_CHANNEL_SIZE: usize = 100;
-const READ_CHANNEL_SIZE: usize = 400;
+const WRITE_CHANNEL_SIZE: usize = 1000;
+const READ_CHANNEL_SIZE: usize = 4000;
 
 pub type WriteTx = crossbeam_channel::Sender<(WriteAction, oneshot::Sender<WriteResult>)>;
 pub type ReadTx = crossbeam_channel::Sender<(ReadAction, oneshot::Sender<ReadResult>)>;

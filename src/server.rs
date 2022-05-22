@@ -1,6 +1,6 @@
 use crate::db::{self, ReadTx, WFail, WriteAction, WriteTx};
 use crate::websocket_handler::{self, connect, ConnectorMsg, Resource};
-use ring::hmac;
+use ring::{constant_time::verify_slices_are_equal, hmac};
 use serde::Deserialize;
 use serde_json;
 use std::time::Duration;
@@ -266,7 +266,9 @@ async fn verify_msg(key: &hmac::Key, headers: &HeaderMap, bytes: &Bytes) -> Resu
 			}
 			Some(header_tag) => match header_tag.to_str() {
 				Ok(tag) => {
-					if tag == calculated_tag {
+					if let Ok(()) =
+						verify_slices_are_equal(calculated_tag.as_bytes(), tag.as_bytes())
+					{
 						return Ok(());
 					}
 				}
