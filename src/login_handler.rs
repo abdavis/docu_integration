@@ -8,6 +8,7 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::oneshot;
+use tokio::task;
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 
 use crate::db::{RSuccess, ReadAction, ReadTx, WriteAction, WriteTx};
@@ -213,7 +214,7 @@ pub enum SessionKind {
 	Admin,
 }
 impl SessionManager {
-	pub fn verify_session_token(&self, token: String) -> Option<User> {
+	pub fn verify_session_token(&self, token: &str) -> Option<User> {
 		if let Ok(decoded_vec) = base64::decode(token) {
 			if let Ok(key) = decoded_vec.try_into() {
 				if let Entry::Occupied(mut occ) = self.map.entry(key) {
@@ -229,7 +230,7 @@ impl SessionManager {
 		None
 	}
 
-	pub fn logout(&self, token: String) {
+	pub fn logout(&self, token: &str) {
 		if let Ok(decoded_vec) = base64::decode(token) {
 			if let Ok(key) = decoded_vec.try_into() {
 				let typed_key: [u8; 32] = key;
@@ -238,7 +239,7 @@ impl SessionManager {
 		}
 	}
 
-	pub fn logout_everywhere(&self, token: String) {
+	pub fn logout_everywhere(&self, token: &str) {
 		if let Some(usr) = self.verify_session_token(token) {
 			self.map.retain(|_, v| v.user.id != usr.id);
 		}
@@ -257,7 +258,7 @@ impl PartialEq for CleanupKey {
 }
 impl Ord for CleanupKey {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		//comparing in reverse order, since we want earlier times to come first
+		//comparing in reverse order, since we want earlier times to be "larger" in the binary heap
 		other.time.cmp(&self.time)
 	}
 }
@@ -292,7 +293,7 @@ async fn cleanup_handler(rx: async_channel::Receiver<CleanupKey>, map: Map) {
 								occ_entry.remove();
 								PeekMut::pop(peeked);
 							} else {
-								peeked.time = std::cmp::min(session.expiry, session.timeout);
+								peeked.time = session.timeout;
 							}
 						}
 					}
@@ -300,4 +301,25 @@ async fn cleanup_handler(rx: async_channel::Receiver<CleanupKey>, map: Map) {
 			}
 		}
 	}
+}
+
+pub fn new(db_rtx: ReadTx, db_wtx: WriteTx) -> (PasswordManager, SessionManager) {
+	let map = Arc::new(DashMap::new());
+	let (tx, rx) = async_channel::bounded(1000);
+
+	task::spawn(cleanup_handler(rx, map.clone()));
+
+	(
+		PasswordManager {
+			map: map.clone(),
+			db_rtx: db_rtx.clone(),
+			db_wtx: db_wtx.clone(),
+			cleanup_tx: tx,
+		},
+		SessionManager {
+			map,
+			db_rtx,
+			db_wtx,
+		},
+	)
 }
