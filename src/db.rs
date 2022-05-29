@@ -248,7 +248,14 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 								":admin": user.admin
 							}){
 								Ok(_) => WriteResult::Ok(0),
-								Err(_) => WriteResult::Err(WFail::DbError("Unable to insert into users table".into()))
+								Err(rusqlite::Error::SqliteFailure(SqliteError{code: _, extended_code: code}, _)) => {
+									if code == 1555 || code == 2067{
+										Err(WFail::Duplicate)
+									} else {
+										Err(WFail::DbError("Unable to insert into users table".into()))
+									}
+								}
+								_=> WriteResult::Err(WFail::DbError("Unable to insert into users table".into()))
 
 							},
 							Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user insert query".into()))
@@ -264,18 +271,19 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 									":reset_required": user.reset_required,
 									":admin": user.admin
 								}){
-									Ok(_) => WriteResult::Ok(0),
-									Err(_) => WriteResult::Err(WFail::DbError("Unable to update user".into()))
+									Ok(1) => WriteResult::Ok(0),
+									Ok(0) => Err(WFail::NoRecord),
+									_=> WriteResult::Err(WFail::DbError("Unable to update user".into()))
 								},
 								Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user update stmt".into()))
 							}
 					}
 				} {
 					Ok(_) => match tran.commit() {
-						Ok(_) => {tx.send(WriteResult::Ok(dups)); update_tx.send(());},
-						Err(_) => {tx.send(WriteResult::Err(WFail::DbError("unable to commit write transaction".into())));}
+						Ok(_) => {tx.send(WriteResult::Ok(dups)).unwrap_or_default(); update_tx.send(()).unwrap_or_default();},
+						Err(_) => {tx.send(WriteResult::Err(WFail::DbError("unable to commit write transaction".into()))).unwrap_or_default();}
 					},
-					Err(val) => {tx.send(WriteResult::Err(val));}
+					Err(val) => {tx.send(WriteResult::Err(val)).unwrap_or_default();}
 
 				}
 			}
@@ -597,6 +605,32 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 				}
 			}
 
+			ReadAction::GetUsers => {
+				match conn.prepare_cached("SELECT id, email, phc_passwd, reset_required, admin FROM users"){
+					Err(_) => Err("Unable to prepare get users stmt".into()),
+					Ok(mut get_users_stmt) => match get_users_stmt.query([]){
+						Err(_) => Err("Unable to query get user stmt".into()),
+						Ok(mut rows) => {
+							let mut users = vec![];
+							match loop{
+								match rows.next(){
+									Err(_) => break Err("Error during get users read loop".into()),
+									Ok(None) => break Ok(()),
+									Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4)){
+										(Ok(id), Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) =>
+											users.push(crate::login_handler::User{id, email, phc_hash, reset_required, admin}),
+										_=> break Err("type conversion error while getting users in loop".into()),
+									}
+								}
+							}{
+								Ok(()) => Ok(RSuccess::Users(users)),
+								Err(string) => Err(string)
+							}
+						}
+					}
+				}
+			}
+
 		});
 	}
 }
@@ -700,7 +734,8 @@ pub enum ReadAction {
 	EnvelopeDetail{ssn:u32},
 	FetchPdf{gid: String},
 	NewEnvelopes,
-	GetUser{user_id: String}
+	GetUser{user_id: String},
+	GetUsers,
 }
 
 pub type ReadResult = Result<RSuccess, String>;
@@ -712,7 +747,8 @@ pub enum RSuccess {
 	EnvelopeDetails(Vec<EnvelopeDetail>),
 	OldBatches(Vec<BatchSummary>),
 	PdfBlob(Vec<u8>),
-	User(Option<crate::login_handler::User>)
+	User(Option<crate::login_handler::User>),
+	Users(Vec<crate::login_handler::User>),
 }
 
 #[derive(Serialize, Debug)]

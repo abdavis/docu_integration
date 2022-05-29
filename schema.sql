@@ -95,7 +95,7 @@ create table pdf(
 ) strict;
 CREATE TABLE users(
     id TEXT PRIMARY KEY NOT NULL,
-    email TEXT NOT NULL,
+    email TEXT,
     phc_passwd TEXT NOT NULL,
     reset_required INTEGER NOT NULL,
     admin INTEGER NOT NULL

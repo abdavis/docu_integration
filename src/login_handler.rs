@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 
-use crate::db::{RSuccess, ReadAction, ReadTx, WriteAction, WriteTx};
+use crate::db::{RSuccess, ReadAction, ReadTx, WFail, WriteAction, WriteTx};
 
 const CONFIG: Config = Config {
 	variant: Variant::Argon2id,
@@ -34,7 +34,7 @@ const SESSION_EXPIRY: u64 = 60 * 60 * 8; //eight hours
 #[derive(Debug, Serialize, Clone)]
 pub struct User {
 	pub id: String,
-	pub email: String,
+	pub email: Option<String>,
 	pub phc_hash: String,
 	pub reset_required: bool,
 	pub admin: bool,
@@ -46,7 +46,13 @@ struct Session {
 	expiry: Instant,
 }
 
-type Map = Arc<DashMap<[u8; 32], Session>>;
+type Map = Arc<DashMap<MapKey, Session>>;
+
+type Salt = [u8; 16];
+
+type TempPassword = [u8; 10];
+
+type MapKey = [u8; 32];
 
 #[derive(Clone)]
 pub struct PasswordManager {
@@ -92,19 +98,19 @@ impl PasswordManager {
 							false => {
 								let random_bytes = thread_rng().gen();
 								let encoded = base64::encode(random_bytes);
+								let timeout = Instant::now() + Duration::from_secs(SESSION_TIMEOUT);
 								self.map.insert(
 									random_bytes,
 									Session {
 										user: fetched_user,
-										timeout: Instant::now()
-											+ Duration::from_secs(SESSION_TIMEOUT),
+										timeout,
 										expiry: Instant::now()
 											+ Duration::from_secs(SESSION_EXPIRY),
 									},
 								);
 								self.cleanup_tx
 									.send(CleanupKey {
-										time: Instant::now() + Duration::from_secs(SESSION_TIMEOUT),
+										time: timeout + Duration::from_secs(SESSION_TIMEOUT / 2),
 										key: random_bytes,
 									})
 									.await
@@ -115,6 +121,11 @@ impl PasswordManager {
 						false => LoginResult::Failed,
 					},
 				}
+			}
+			Ok(Ok(RSuccess::User(None))) => {
+				//hash garbage password as noop, make sure constant login time applies
+				argon2::hash_encoded(b"foobarBytes", b"foobarSalt", &CONFIG).unwrap_or_default();
+				LoginResult::Failed
 			}
 			catch => {
 				println!("{catch:?}");
@@ -159,7 +170,7 @@ impl PasswordManager {
 						true => {
 							match argon2::hash_encoded(
 								new_pwd.as_bytes(),
-								&thread_rng().gen::<[u8; 16]>(),
+								&thread_rng().gen::<Salt>(),
 								&CONFIG,
 							) {
 								Err(_) => PswdChangeResult::Failed,
@@ -191,6 +202,11 @@ impl PasswordManager {
 					},
 				}
 			}
+			Ok(Ok(RSuccess::User(None))) => {
+				//Hash dummy password, prevent timing attacks
+				argon2::hash_encoded(b"foobytes1", b"foobarSalt", &CONFIG).unwrap_or_default();
+				PswdChangeResult::Failed
+			}
 			catch => {
 				println!("{catch:?}");
 				PswdChangeResult::Failed
@@ -209,12 +225,17 @@ pub struct SessionManager {
 	db_wtx: WriteTx,
 	db_rtx: ReadTx,
 }
-pub enum SessionKind {
-	User,
-	Admin,
+
+pub enum SessionFailure {
+	Duplicate,
+	NoUser,
+	AuthFailed,
+	AdminRequired,
+	InternalError,
 }
+
 impl SessionManager {
-	pub fn verify_session_token(&self, token: &str) -> Option<User> {
+	pub fn verify_session_token(&self, token: &str) -> Result<User, SessionFailure> {
 		if let Ok(decoded_vec) = base64::decode(token) {
 			if let Ok(key) = decoded_vec.try_into() {
 				if let Entry::Occupied(mut occ) = self.map.entry(key) {
@@ -223,25 +244,82 @@ impl SessionManager {
 						Instant::now() + Duration::from_secs(SESSION_TIMEOUT),
 						session.expiry,
 					);
-					return Some(session.user.clone());
+					return Ok(session.user.clone());
 				}
 			}
 		}
-		None
+		Err(SessionFailure::AuthFailed)
+	}
+
+	pub fn verify_admin_session_token(&self, token: &str) -> Result<User, SessionFailure> {
+		let user = self.verify_session_token(token)?;
+		match user.admin {
+			true => Ok(user),
+			false => Err(SessionFailure::AdminRequired),
+		}
 	}
 
 	pub fn logout(&self, token: &str) {
 		if let Ok(decoded_vec) = base64::decode(token) {
-			if let Ok(key) = decoded_vec.try_into() {
-				let typed_key: [u8; 32] = key;
+			if let Ok::<MapKey, _>(key) = decoded_vec.try_into() {
 				self.map.remove(&key);
 			}
 		}
 	}
 
 	pub fn logout_everywhere(&self, token: &str) {
-		if let Some(usr) = self.verify_session_token(token) {
+		if let Ok(usr) = self.verify_session_token(token) {
 			self.map.retain(|_, v| v.user.id != usr.id);
+		}
+	}
+
+	pub async fn get_users(&self, token: &str) -> Result<Vec<User>, SessionFailure> {
+		self.verify_admin_session_token(token)?;
+		let (tx, rx) = oneshot::channel();
+		self.db_rtx
+			.send((ReadAction::GetUsers, tx))
+			.unwrap_or_default();
+		match rx.await {
+			Ok(Ok(RSuccess::Users(users))) => Ok(users),
+			_ => Err(SessionFailure::InternalError),
+		}
+	}
+
+	pub async fn create_user(
+		&self,
+		token: &str,
+		id: String,
+		email: Option<String>,
+		admin: bool,
+	) -> Result<String, SessionFailure> {
+		self.verify_admin_session_token(token)?;
+		let temp_password = base64::encode(thread_rng().gen::<TempPassword>());
+		match argon2::hash_encoded(
+			temp_password.as_bytes(),
+			&thread_rng().gen::<Salt>(),
+			&CONFIG,
+		) {
+			Err(_) => Err(SessionFailure::InternalError),
+			Ok(phc_hash) => {
+				let (tx, rx) = oneshot::channel();
+				self.db_wtx
+					.send((
+						WriteAction::CreateUser(User {
+							id,
+							email,
+							admin,
+							phc_hash,
+							reset_required: true,
+						}),
+						tx,
+					))
+					.unwrap_or_default();
+				match rx.await {
+					Ok(Ok(_)) => Ok(temp_password),
+					Ok(Err(WFail::Duplicate)) => Err(SessionFailure::Duplicate),
+					_ => Err(SessionFailure::InternalError),
+				}
+			}
 		}
 	}
 }
@@ -249,7 +327,7 @@ impl SessionManager {
 #[derive(Eq)]
 struct CleanupKey {
 	time: Instant,
-	key: [u8; 32],
+	key: MapKey,
 }
 impl PartialEq for CleanupKey {
 	fn eq(&self, other: &Self) -> bool {
@@ -293,7 +371,7 @@ async fn cleanup_handler(rx: async_channel::Receiver<CleanupKey>, map: Map) {
 								occ_entry.remove();
 								PeekMut::pop(peeked);
 							} else {
-								peeked.time = session.timeout;
+								peeked.time = session.timeout + Duration::from_secs(SESSION_TIMEOUT/2);
 							}
 						}
 					}
@@ -303,7 +381,46 @@ async fn cleanup_handler(rx: async_channel::Receiver<CleanupKey>, map: Map) {
 	}
 }
 
-pub fn new(db_rtx: ReadTx, db_wtx: WriteTx) -> (PasswordManager, SessionManager) {
+pub async fn new(db_rtx: ReadTx, db_wtx: WriteTx) -> (PasswordManager, SessionManager) {
+	//create admin user if it doesn't exit
+	let (one_tx, one_rx) = oneshot::channel();
+	db_rtx
+		.send((
+			ReadAction::GetUser {
+				user_id: "admin".into(),
+			},
+			one_tx,
+		))
+		.unwrap_or_default();
+	match one_rx.await {
+		Ok(Ok(RSuccess::User(None))) => {
+			let pswd = base64::encode(thread_rng().gen::<TempPassword>());
+			match argon2::hash_encoded(pswd.as_bytes(), &thread_rng().gen::<Salt>(), &CONFIG) {
+				Err(_) => println!("unable to create new admin user"),
+				Ok(phc_hash) => {
+					let (tx, rx) = oneshot::channel();
+					db_wtx
+						.send((
+							WriteAction::CreateUser(User {
+								id: "admin".into(),
+								email: None,
+								reset_required: true,
+								admin: true,
+								phc_hash,
+							}),
+							tx,
+						))
+						.unwrap_or_default();
+					match rx.await {
+						Ok(Ok(_)) => println!("Created new admin user with password: {pswd}"),
+						_ => println!("Unable to create new admin user"),
+					}
+				}
+			}
+		}
+		_ => (),
+	}
+
 	let map = Arc::new(DashMap::new());
 	let (tx, rx) = async_channel::bounded(1000);
 
