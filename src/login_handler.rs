@@ -322,6 +322,11 @@ impl SessionManager {
 			}
 		}
 	}
+
+	pub async fn reset_password(&self, token: &str, id: &str) -> Result<(), SessionFailure> {
+		self.verify_admin_session_token(token)?;
+		Ok(())
+	}
 }
 
 #[derive(Eq)]

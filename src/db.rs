@@ -262,12 +262,11 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 						}
 					}
 					WriteAction::UpdateUser(user) => {
-						match tran.prepare_cached("UPDATE users SET email = :email, phc_passwd = :phc_hash, reset_required = :reset_required, admin = :admin
+						match tran.prepare_cached("UPDATE users SET email = :email, reset_required = :reset_required, admin = :admin
 							WHERE id = :id"){
 								Ok(mut user_update) => match user_update.execute(named_params!{
 									":id": user.id,
 									":email": user.email,
-									":phc_hash": user.phc_hash,
 									":reset_required": user.reset_required,
 									":admin": user.admin
 								}){
@@ -277,6 +276,19 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 								},
 								Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user update stmt".into()))
 							}
+					},
+					WriteAction::ResetPassword{id,phc_hash} => {
+						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = TRUE WHERE id = :id"){
+							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
+							Ok(mut reset_pass) => match reset_pass.execute(named_params!{
+								":phc_hash": phc_hash,
+								":id": id
+							}){
+								Ok(1) => Ok(0),
+								Ok(0) => Err(WFail::NoRecord),
+								_=> Err(WFail::DbError("Unable to execute reset_pass query".into())),
+							}
+						}
 					}
 				} {
 					Ok(_) => match tran.commit() {
@@ -665,7 +677,9 @@ pub enum WriteAction {
 
 	CreateUser(crate::login_handler::User),
 
-	UpdateUser(crate::login_handler::User)
+	UpdateUser(crate::login_handler::User),
+
+	ResetPassword{id: String, phc_hash: String},
 }
 
 #[derive(Serialize, Debug)]
