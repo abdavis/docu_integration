@@ -1,4 +1,5 @@
 use argon2::{Config, ThreadMode, Variant, Version};
+use core::fmt;
 use dashmap::{mapref::entry::Entry, DashMap};
 use rand::{thread_rng, Rng};
 use serde::Serialize;
@@ -10,6 +11,7 @@ use tokio::select;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::{sleep, sleep_until, Duration, Instant};
+use warp::http::StatusCode;
 
 use crate::db::{RSuccess, ReadAction, ReadTx, WFail, WriteAction, WriteTx};
 
@@ -50,7 +52,7 @@ type Map = Arc<DashMap<MapKey, Session>>;
 
 type Salt = [u8; 16];
 
-type TempPassword = [u8; 10];
+type TempPassword = [u8; 12];
 
 type MapKey = [u8; 32];
 
@@ -124,7 +126,7 @@ impl PasswordManager {
 			}
 			Ok(Ok(RSuccess::User(None))) => {
 				//hash garbage password as noop, make sure constant login time applies
-				argon2::hash_encoded(b"foobarBytes", b"foobarSalt", &CONFIG).unwrap_or_default();
+				argon2::hash_encoded(pswd.as_bytes(), b"foobarSalt", &CONFIG).unwrap_or_default();
 				LoginResult::Failed
 			}
 			catch => {
@@ -170,7 +172,10 @@ impl PasswordManager {
 						true => {
 							match argon2::hash_encoded(
 								new_pwd.as_bytes(),
-								&thread_rng().gen::<Salt>(),
+								&{
+									let salt: Salt = thread_rng().gen();
+									salt
+								},
 								&CONFIG,
 							) {
 								Err(_) => PswdChangeResult::Failed,
@@ -204,7 +209,7 @@ impl PasswordManager {
 			}
 			Ok(Ok(RSuccess::User(None))) => {
 				//Hash dummy password, prevent timing attacks
-				argon2::hash_encoded(b"foobytes1", b"foobarSalt", &CONFIG).unwrap_or_default();
+				argon2::hash_encoded(pwd.as_bytes(), b"foobarSalt", &CONFIG).unwrap_or_default();
 				PswdChangeResult::Failed
 			}
 			catch => {
@@ -220,6 +225,7 @@ impl PasswordManager {
 	}
 }
 
+#[derive(Clone)]
 pub struct SessionManager {
 	map: Map,
 	db_wtx: WriteTx,
@@ -232,6 +238,28 @@ pub enum SessionFailure {
 	AuthFailed,
 	AdminRequired,
 	InternalError,
+}
+impl SessionFailure {
+	pub fn to_status_code(&self) -> StatusCode {
+		match self {
+			SessionFailure::Duplicate => StatusCode::CONFLICT,
+			SessionFailure::NoUser => StatusCode::NOT_FOUND,
+			SessionFailure::AuthFailed => StatusCode::UNAUTHORIZED,
+			SessionFailure::AdminRequired => StatusCode::FORBIDDEN,
+			SessionFailure::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
+		}
+	}
+}
+impl fmt::Display for SessionFailure {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			SessionFailure::Duplicate => write!(f, "User already exists"),
+			SessionFailure::NoUser => write!(f, "User does not exist"),
+			SessionFailure::AuthFailed => write!(f, "Authentication required"),
+			SessionFailure::AdminRequired => write!(f, "Admin privileges required"),
+			SessionFailure::InternalError => write!(f, "Internal Error"),
+		}
+	}
 }
 
 impl SessionManager {
@@ -323,9 +351,27 @@ impl SessionManager {
 		}
 	}
 
-	pub async fn reset_password(&self, token: &str, id: &str) -> Result<(), SessionFailure> {
+	pub async fn reset_password(&self, token: &str, id: String) -> Result<String, SessionFailure> {
 		self.verify_admin_session_token(token)?;
-		Ok(())
+		let new_password = base64::encode(thread_rng().gen::<TempPassword>());
+		match argon2::hash_encoded(
+			new_password.as_bytes(),
+			&thread_rng().gen::<TempPassword>(),
+			&CONFIG,
+		) {
+			Err(_) => Err(SessionFailure::InternalError),
+			Ok(phc_hash) => {
+				let (tx, rx) = oneshot::channel();
+				self.db_wtx
+					.send((WriteAction::ResetPassword { id, phc_hash }, tx))
+					.unwrap_or_default();
+				match rx.await {
+					Ok(Ok(_)) => Ok(new_password),
+					Ok(Err(WFail::NoRecord)) => Err(SessionFailure::NoUser),
+					_ => Err(SessionFailure::InternalError),
+				}
+			}
+		}
 	}
 }
 
@@ -397,33 +443,30 @@ pub async fn new(db_rtx: ReadTx, db_wtx: WriteTx) -> (PasswordManager, SessionMa
 			one_tx,
 		))
 		.unwrap_or_default();
-	match one_rx.await {
-		Ok(Ok(RSuccess::User(None))) => {
-			let pswd = base64::encode(thread_rng().gen::<TempPassword>());
-			match argon2::hash_encoded(pswd.as_bytes(), &thread_rng().gen::<Salt>(), &CONFIG) {
-				Err(_) => println!("unable to create new admin user"),
-				Ok(phc_hash) => {
-					let (tx, rx) = oneshot::channel();
-					db_wtx
-						.send((
-							WriteAction::CreateUser(User {
-								id: "admin".into(),
-								email: None,
-								reset_required: true,
-								admin: true,
-								phc_hash,
-							}),
-							tx,
-						))
-						.unwrap_or_default();
-					match rx.await {
-						Ok(Ok(_)) => println!("Created new admin user with password: {pswd}"),
-						_ => println!("Unable to create new admin user"),
-					}
+	if let Ok(Ok(RSuccess::User(None))) = one_rx.await {
+		let pswd = base64::encode(thread_rng().gen::<TempPassword>());
+		match argon2::hash_encoded(pswd.as_bytes(), &thread_rng().gen::<Salt>(), &CONFIG) {
+			Err(_) => println!("unable to create new admin user"),
+			Ok(phc_hash) => {
+				let (tx, rx) = oneshot::channel();
+				db_wtx
+					.send((
+						WriteAction::CreateUser(User {
+							id: "admin".into(),
+							email: None,
+							reset_required: true,
+							admin: true,
+							phc_hash,
+						}),
+						tx,
+					))
+					.unwrap_or_default();
+				match rx.await {
+					Ok(Ok(_)) => println!("Created new admin user with password: {pswd}"),
+					_ => println!("Unable to create new admin user"),
 				}
 			}
 		}
-		_ => (),
 	}
 
 	let map = Arc::new(DashMap::new());

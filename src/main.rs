@@ -107,9 +107,17 @@ async fn main() {
 		rtx.clone(),
 	);
 	tasks.push(proc_handle);
-
+	let (password_manager, session_manager) =
+		crate::login_handler::new(rtx.clone(), wtx.clone()).await;
 	let (ws_handler_tx, ws_handler_rx) = async_channel::bounded(1000);
-	tasks.push(server::create_server(&config, &wtx, &rtx, ws_handler_tx));
+	tasks.push(server::create_server(
+		&config,
+		&wtx,
+		&rtx,
+		ws_handler_tx,
+		password_manager,
+		session_manager,
+	));
 	tasks.push(task::spawn(websocket_handler::connector_task(
 		ws_handler_rx,
 		rtx,

@@ -1,8 +1,8 @@
 use crossbeam_channel;
-use rusqlite::{config::DbConfig, named_params, Connection, OpenFlags, ffi::{Error as SqliteError}};
-use std::thread;
-use tokio::sync::{oneshot, broadcast};
+use rusqlite::{config::DbConfig, ffi::Error as SqliteError, named_params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::thread;
+use tokio::sync::{broadcast, oneshot};
 
 const READ_THREADS: usize = 4;
 const WRITE_CHANNEL_SIZE: usize = 1000;
@@ -32,7 +32,10 @@ pub fn init() -> (
 	(wtx, rtx, update_sender_copy, handles)
 }
 
-fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender<WriteResult>)>, update_tx: broadcast::Sender<()>) {
+fn database_writer(
+	rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender<WriteResult>)>,
+	update_tx: broadcast::Sender<()>,
+) {
 	let mut conn = Connection::open_with_flags(
 		"db.sqlite3",
 		OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -40,21 +43,27 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 	.expect("Unable to Open Database. Is it missing?");
 	conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, true)
 		.expect("Enable Foreign Key Failed.");
-	
-	conn.pragma_update(None, "journal_mode", "WAL").expect("Setting Wal mode failed");
-	conn.pragma_update(None, "synchronous", "normal").expect("Setting synchronous mode failed");
-	conn.pragma_update(None, "temp_store", "memory").expect("setting temp_store failed");
-	conn.pragma_update(None, "mmap_size", 30000000000 as u64).expect("unable to set mmap size");
+
+	conn.pragma_update(None, "journal_mode", "WAL")
+		.expect("Setting Wal mode failed");
+	conn.pragma_update(None, "synchronous", "normal")
+		.expect("Setting synchronous mode failed");
+	conn.pragma_update(None, "temp_store", "memory")
+		.expect("setting temp_store failed");
+	conn.pragma_update(None, "mmap_size", 30000000000 as u64)
+		.expect("unable to set mmap size");
 
 	for (event, tx) in rx {
 		match conn.transaction() {
 			Err(_) => {
-				tx.send(WriteResult::Err(WFail::DbError("Unable to begin transaction".into())));
-			},
+				tx.send(WriteResult::Err(WFail::DbError(
+					"Unable to begin transaction".into(),
+				)));
+			}
 			Ok(tran) => {
 				let mut dups = 0;
 
-				 match match event {
+				match match event {
 					WriteAction::NewBatch (batch_data) => {
 						match tran.prepare_cached("INSERT INTO company_batches (batch_name, description) VALUES (:name, :desc)") {
 							Err(_) => WriteResult::Err(WFail::DbError("Prepare Company Batches Failed".into())),
@@ -64,7 +73,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 									Err(rusqlite::Error::SqliteFailure(SqliteError{ code: _, extended_code: 2067 }, _)) => {WriteResult::Err(WFail::Duplicate)},
 									//All other errors
 									Err(_) => WriteResult::Err(WFail::DbError("Failed to insert into company_batches".into())),
-									
+
 									Ok(id) => {
 										match (
 											tran.prepare_cached("INSERT INTO acct_data (ssn) VALUES (:ssn)"),
@@ -86,7 +95,6 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 																}
 															} else {
 																return WriteResult::Err(WFail::DbError("{batch_name} Failed during new batch insert loop at acct_ins".into()));
-															
 															}
 														}
 
@@ -96,11 +104,10 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 																	dups += 1;
 																} else{
 																	return WriteResult::Err(WFail::DbError("{batch_name} Failed during new batch insert loop at relat_ins".into()));
-																	
+
 																}
 															} else {
 																return WriteResult::Err(WFail::DbError("{batch_name} Failed during new batch insert loop at relat_ins".into()));
-																
 															}
 														}
 														let (spouse_fname, spouse_mname, spouse_lname, spouse_email) = match record.spouse {
@@ -131,11 +138,9 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 																	dups += 1;
 																} else{
 																	return WriteResult::Err(WFail::DbError("{batch_name} Failed during new batch insert loop at envl_ins".into()));
-																	
 																}
 															} else {
 																return WriteResult::Err(WFail::DbError("{batch_name} Failed during new batch insert loop at envl_ins".into()));
-																
 															}
 														}
 													}
@@ -146,7 +151,6 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 											}
 											_ => {
 												WriteResult::Err(WFail::DbError("Unable to prepare statements for batch insert loop".into()))
-												
 											}
 										}
 									}
@@ -247,7 +251,7 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 								":reset_required": user.reset_required,
 								":admin": user.admin
 							}){
-								Ok(_) => WriteResult::Ok(0),
+								Ok(_) => Ok(0),
 								Err(rusqlite::Error::SqliteFailure(SqliteError{code: _, extended_code: code}, _)) => {
 									if code == 1555 || code == 2067{
 										Err(WFail::Duplicate)
@@ -255,10 +259,10 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 										Err(WFail::DbError("Unable to insert into users table".into()))
 									}
 								}
-								_=> WriteResult::Err(WFail::DbError("Unable to insert into users table".into()))
+								_=> Err(WFail::DbError("Unable to insert into users table".into()))
 
 							},
-							Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user insert query".into()))
+							Err(_) => Err(WFail::DbError("Unable to prepare user insert query".into()))
 						}
 					}
 					WriteAction::UpdateUser(user) => {
@@ -270,11 +274,11 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 									":reset_required": user.reset_required,
 									":admin": user.admin
 								}){
-									Ok(1) => WriteResult::Ok(0),
+									Ok(1) => Ok(0),
 									Ok(0) => Err(WFail::NoRecord),
-									_=> WriteResult::Err(WFail::DbError("Unable to update user".into()))
+									_=> Err(WFail::DbError("Unable to update user".into()))
 								},
-								Err(_) => WriteResult::Err(WFail::DbError("Unable to prepare user update stmt".into()))
+								Err(_) => Err(WFail::DbError("Unable to prepare user update stmt".into()))
 							}
 					},
 					WriteAction::ResetPassword{id,phc_hash} => {
@@ -299,7 +303,6 @@ fn database_writer(rx: crossbeam_channel::Receiver<(WriteAction, oneshot::Sender
 
 				}
 			}
-
 		}
 	}
 }
@@ -312,11 +315,15 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 	.expect("Unable to Open Database. Is it missing?");
 	conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, true)
 		.expect("Enable Foreign Key Failed.");
-	
-	conn.pragma_update(None, "journal_mode", "WAL").expect("Setting Wal mode failed");
-	conn.pragma_update(None, "synchronous", "normal").expect("Setting synchronous mode failed");
-	conn.pragma_update(None, "temp_store", "memory").expect("setting temp_store failed");
-	conn.pragma_update(None, "mmap_size", 30000000000 as u64).expect("unable to set mmap size");
+
+	conn.pragma_update(None, "journal_mode", "WAL")
+		.expect("Setting Wal mode failed");
+	conn.pragma_update(None, "synchronous", "normal")
+		.expect("Setting synchronous mode failed");
+	conn.pragma_update(None, "temp_store", "memory")
+		.expect("setting temp_store failed");
+	conn.pragma_update(None, "mmap_size", 30000000000 as u64)
+		.expect("unable to set mmap size");
 
 	for (event, tx) in rx {
 		let _res = tx.send(match event {
@@ -648,7 +655,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 }
 
 pub enum WriteAction {
-	NewBatch (BatchData),
+	NewBatch(BatchData),
 
 	UpdateAcct(Acct),
 
@@ -656,7 +663,7 @@ pub enum WriteAction {
 		gid: String,
 		status: String,
 		void_reason: Option<String>,
-		api_err: Option<String>
+		api_err: Option<String>,
 	},
 
 	UpdateStatusWithId {
@@ -664,7 +671,7 @@ pub enum WriteAction {
 		gid: Option<String>,
 		status: String,
 		void_reason: Option<String>,
-		api_err: Option<String>
+		api_err: Option<String>,
 	},
 
 	CompleteEnvelope {
@@ -672,14 +679,17 @@ pub enum WriteAction {
 		status: String,
 		beneficiaries: Vec<Beneficiary>,
 		authorized_users: Vec<AuthorizedUser>,
-		pdf: Vec<u8>
+		pdf: Vec<u8>,
 	},
 
 	CreateUser(crate::login_handler::User),
 
 	UpdateUser(crate::login_handler::User),
 
-	ResetPassword{id: String, phc_hash: String},
+	ResetPassword {
+		id: String,
+		phc_hash: String,
+	},
 }
 
 #[derive(Serialize, Debug)]
@@ -691,7 +701,7 @@ pub struct Beneficiary {
 	pub dob: String,
 	pub relationship: String,
 	pub ssn: u32,
-	pub percent: u32
+	pub percent: u32,
 }
 
 #[derive(Serialize, Debug)]
@@ -704,29 +714,30 @@ impl ToString for BeneficiaryType {
 	fn to_string(&self) -> String {
 		match self {
 			BeneficiaryType::Primary => "primary".into(),
-			BeneficiaryType::Contingent => "contingent".into()
+			BeneficiaryType::Contingent => "contingent".into(),
 		}
 	}
 }
 
 impl rusqlite::types::FromSql for BeneficiaryType {
-
-fn column_result( value: rusqlite::types::ValueRef<'_>) -> std::result::Result<Self, rusqlite::types::FromSqlError> {
-	let val = value.as_str()?;
-	//set type to contingent if specified, otherwise assume primary
-	if val == "contingent" {
-		return Ok(Self::Contingent)
+	fn column_result(
+		value: rusqlite::types::ValueRef<'_>,
+	) -> std::result::Result<Self, rusqlite::types::FromSqlError> {
+		let val = value.as_str()?;
+		//set type to contingent if specified, otherwise assume primary
+		if val == "contingent" {
+			return Ok(Self::Contingent);
+		}
+		if val == "primary" {
+			return Ok(Self::Primary);
+		}
+		Err(rusqlite::types::FromSqlError::InvalidType)
 	}
-	if val == "primary" {
-		return Ok(Self::Primary)
-	}
-	Err(rusqlite::types::FromSqlError::InvalidType)
-}
 }
 #[derive(Serialize, Debug)]
 pub struct AuthorizedUser {
 	pub name: String,
-	pub dob: String
+	pub dob: String,
 }
 
 pub type WriteResult = Result<i32, WFail>;
@@ -743,12 +754,12 @@ pub enum WFail {
 pub enum ReadAction {
 	ActiveBatches,
 	//rowid for batch detail
-	BatchDetail{rowid: i64},
+	BatchDetail { rowid: i64 },
 	//ssn for individual detail
-	EnvelopeDetail{ssn:u32},
-	FetchPdf{gid: String},
+	EnvelopeDetail { ssn: u32 },
+	FetchPdf { gid: String },
 	NewEnvelopes,
-	GetUser{user_id: String},
+	GetUser { user_id: String },
 	GetUsers,
 }
 
@@ -778,7 +789,7 @@ pub struct BatchDetail {
 	pub status: Option<String>,
 	pub void_reason: Option<String>,
 	pub api_err: Option<String>,
-	pub ignore_error: bool
+	pub ignore_error: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -811,12 +822,13 @@ pub struct EnvelopeDetail {
 	pub date_created: i64,
 	pub is_married: Option<bool>,
 	pub beneficiaries: Vec<Beneficiary>,
-	pub auth_users: Vec<AuthorizedUser>
-}#[derive(Deserialize)]
+	pub auth_users: Vec<AuthorizedUser>,
+}
+#[derive(Deserialize)]
 pub struct BatchData {
 	pub name: String,
 	pub description: String,
-	pub records: Vec<CsvImport>
+	pub records: Vec<CsvImport>,
 }
 #[derive(Clone, Deserialize)]
 pub struct CsvImport {

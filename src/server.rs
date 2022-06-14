@@ -1,34 +1,52 @@
 use crate::db::{self, ReadTx, WFail, WriteAction, WriteTx};
+use crate::login_handler::{LoginResult, PasswordManager, SessionFailure, SessionManager};
 use crate::websocket_handler::{self, connect, ConnectorMsg, Resource};
 use ring::{constant_time::verify_slices_are_equal, hmac};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::sleep;
 use warp::{
-	http::{self, HeaderMap},
+	http::{self, header, HeaderMap, StatusCode},
 	hyper::{self, body::Bytes},
 	Filter, Reply,
 };
+
+//8 hours
+const SESSION_COOKIE_AGE: u64 = 60 * 60 * 8;
 
 pub fn create_server(
 	config: &crate::Config,
 	db_wtx: &WriteTx,
 	db_rtx: &ReadTx,
 	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
+	password_manager: PasswordManager,
+	session_manager: SessionManager,
 ) -> task::JoinHandle<()> {
 	let config = config.clone();
 	let wtx = db_wtx.clone();
 	let rtx = db_rtx.clone();
-	task::spawn(async move { server(config, wtx, rtx, ws_handler_tx).await })
+	task::spawn(async move {
+		server(
+			config,
+			wtx,
+			rtx,
+			ws_handler_tx,
+			password_manager,
+			session_manager,
+		)
+		.await
+	})
 }
 async fn server(
 	config: crate::Config,
 	db_wtx: WriteTx,
 	db_rtx: ReadTx,
 	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
+	password_manager: PasswordManager,
+	session_manager: SessionManager,
 ) {
 	println!("Building server");
 
@@ -142,7 +160,153 @@ async fn server(
 
 	let hello = warp::any().map(|| "Hello World");
 
-	warp::serve(webhook.or(new_batch).or(websocket_filter).or(hello))
+	let password_manager2 = password_manager.clone();
+	let login_filter = warp::path!("login")
+		.and(warp::body::content_length_limit(1024 * 32))
+		.and(warp::post())
+		.and(warp::body::form())
+		.then(move |form_data: Box<[(String, String)]>| {
+			let password_manager = password_manager.clone();
+			async move {
+				match (
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "username" { Some(v) } else { None }),
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "password" { Some(v) } else { None }),
+				) {
+					(Some(username), Some(password)) => match password_manager
+						.login(username.clone(), password.clone())
+						.await
+					{
+						LoginResult::Success(val) => warp::reply::with_header(
+							warp::reply::with_header(
+								warp::reply::with_status(warp::reply(), StatusCode::FOUND),
+								header::LOCATION,
+								"/",
+							),
+							header::SET_COOKIE,
+							format!(
+								"session={val}; Max-Age={SESSION_COOKIE_AGE};
+									HttpOnly; Secure; SameSite=Strict"
+							),
+						)
+						.into_response(),
+
+						LoginResult::MustChangePwd => warp::reply::with_status(
+							warp::reply::with_header(
+								warp::reply(),
+								header::LOCATION,
+								"/login/change_password#mustchange",
+							),
+							StatusCode::FOUND,
+						)
+						.into_response(),
+
+						LoginResult::Failed => warp::reply::with_status(
+							warp::reply::with_header(
+								warp::reply(),
+								header::LOCATION,
+								"/login#failed",
+							),
+							StatusCode::FOUND,
+						)
+						.into_response(),
+					},
+					_ => warp::reply::with_status(warp::reply(), StatusCode::BAD_REQUEST)
+						.into_response(),
+				}
+			}
+		});
+
+	let change_pswd_filter = warp::path!("login" / " change_password")
+		.and(warp::body::content_length_limit(1024 * 32))
+		.and(warp::post())
+		.and(warp::body::form())
+		.then(move |form_data: Box<[(String, String)]>| {
+			let password_manager = password_manager2.clone();
+			async move {
+				match (
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "username" { Some(v) } else { None }),
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "password" { Some(v) } else { None }),
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "new_pass1" { Some(v) } else { None }),
+					form_data
+						.iter()
+						.find_map(|(k, v)| if k == "new_pass2" { Some(v) } else { None }),
+				) {
+					(Some(username), Some(password), Some(new_pass1), Some(new_pass2)) => {
+						match password_manager
+							.change_pswd(
+								username.clone(),
+								password.clone(),
+								new_pass1.clone(),
+								new_pass2.clone(),
+							)
+							.await
+						{
+							crate::login_handler::PswdChangeResult::Success => {
+								warp::reply::with_status(
+									warp::reply::with_header(
+										warp::reply(),
+										header::LOCATION,
+										"/login#changedpassword",
+									),
+									StatusCode::FOUND,
+								)
+								.into_response()
+							}
+
+							crate::login_handler::PswdChangeResult::MismatchedPswds => {
+								warp::reply::with_status(
+									warp::reply::with_header(
+										warp::reply(),
+										header::LOCATION,
+										"/login/change_password#mismatched",
+									),
+									StatusCode::FOUND,
+								)
+								.into_response()
+							}
+
+							crate::login_handler::PswdChangeResult::Failed => {
+								warp::reply::with_status(
+									warp::reply::with_header(
+										warp::reply(),
+										header::LOCATION,
+										"/login/change_password#failed",
+									),
+									StatusCode::FOUND,
+								)
+								.into_response()
+							}
+						}
+					}
+					_ => warp::reply::with_status(warp::reply(), StatusCode::BAD_REQUEST)
+						.into_response(),
+				}
+			}
+		});
+
+	let api = warp::path("api").and(
+		webhook
+			.or(new_batch)
+			.or(websocket_filter)
+			.or(login_filter)
+			.or(change_pswd_filter)
+			.or(hello),
+	);
+
+	warp::serve(api)
+		.tls()
+		.cert_path("cert/cert.pem")
+		.key_path("cert/key.pem")
 		.run(([127, 0, 0, 1], 8081))
 		.await;
 
