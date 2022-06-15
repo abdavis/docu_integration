@@ -109,52 +109,95 @@ async fn server(
 
 	let ws_handler_2 = ws_handler_tx.clone();
 	let ws_handler_3 = ws_handler_tx.clone();
+	let session_manager2 = session_manager.clone();
 
 	let websocket_main = warp::path::end()
 		.and(warp::ws())
-		.map(move |ws: warp::ws::Ws| {
-			let ws_handler_tx = ws_handler_tx.clone();
-			ws.on_upgrade(move |socket| async move {
-				ws_handler_tx
-					.send(ConnectorMsg {
-						channel: connect(socket),
-						resource: Resource::Main,
-					})
-					.await
-					.unwrap_or_default();
-			})
-		});
+		.and(warp::cookie::optional("session"))
+		.map(
+			move |ws: warp::ws::Ws, maybe_cookie: Option<String>| match maybe_cookie {
+				None => {
+					warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+						.into_response()
+				}
 
-	let websocket_batch =
-		warp::path!("batch" / i64)
-			.and(warp::ws())
-			.map(move |batch_id, ws: warp::ws::Ws| {
-				let ws_handler_tx = ws_handler_2.clone();
-				ws.on_upgrade(move |socket| async move {
-					let result = ws_handler_tx
-						.send(ConnectorMsg {
-							channel: connect(socket),
-							resource: Resource::Batch(batch_id),
+				Some(cookie) => match session_manager.verify_session_token(&cookie) {
+					Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+						.into_response(),
+					Ok(_) => {
+						let ws_handler_tx = ws_handler_tx.clone();
+						ws.on_upgrade(move |socket| async move {
+							ws_handler_tx
+								.send(ConnectorMsg {
+									channel: connect(socket),
+									resource: Resource::Main,
+								})
+								.await
+								.unwrap_or_default();
 						})
-						.await;
-				})
-			});
+						.into_response()
+					}
+				},
+			},
+		);
 
-	let websocket_individual =
-		warp::path!("individual" / u32)
-			.and(warp::ws())
-			.map(move |ssn, ws: warp::ws::Ws| {
-				let ws_handler_tx = ws_handler_3.clone();
-				ws.on_upgrade(move |socket| async move {
-					ws_handler_tx
-						.send(ConnectorMsg {
-							channel: connect(socket),
-							resource: Resource::Individual(ssn),
+	let session_manager3 = session_manager2.clone();
+	let websocket_batch = warp::path!("batch" / i64)
+		.and(warp::ws())
+		.and(warp::cookie::optional("session"))
+		.map(
+			move |batch_id, ws: warp::ws::Ws, maybe_cookie: Option<String>| match maybe_cookie {
+				None => {
+					warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+						.into_response()
+				}
+				Some(cookie) => match session_manager2.verify_session_token(&cookie) {
+					Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+						.into_response(),
+					Ok(_) => {
+						let ws_handler_tx = ws_handler_2.clone();
+						ws.on_upgrade(move |socket| async move {
+							let result = ws_handler_tx
+								.send(ConnectorMsg {
+									channel: connect(socket),
+									resource: Resource::Batch(batch_id),
+								})
+								.await;
 						})
-						.await
-						.unwrap_or_default();
-				})
-			});
+						.into_response()
+					}
+				},
+			},
+		);
+
+	let websocket_individual = warp::path!("individual" / u32)
+		.and(warp::ws())
+		.and(warp::cookie::optional("session"))
+		.map(
+			move |ssn, ws: warp::ws::Ws, maybe_cookie: Option<String>| match maybe_cookie {
+				None => {
+					warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+						.into_response()
+				}
+				Some(cookie) => match session_manager3.verify_session_token(&cookie) {
+					Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+						.into_response(),
+					Ok(_) => {
+						let ws_handler_tx = ws_handler_3.clone();
+						ws.on_upgrade(move |socket| async move {
+							ws_handler_tx
+								.send(ConnectorMsg {
+									channel: connect(socket),
+									resource: Resource::Individual(ssn),
+								})
+								.await
+								.unwrap_or_default();
+						})
+						.into_response()
+					}
+				},
+			},
+		);
 
 	let websocket_filter = websocket_main.or(websocket_batch).or(websocket_individual);
 
