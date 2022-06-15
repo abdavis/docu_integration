@@ -126,6 +126,7 @@ async fn main() {
 
 	processor_tx.send(()).await;
 	drop(processor_tx);
+	drop(wtx);
 	for task in tasks {
 		task.await;
 	}
