@@ -12,13 +12,12 @@ const CONCURRENCY_BUFFER: usize = 10;
 pub fn init_batch_processor(
 	http_client: &Client,
 	config: &Config,
-	token: &AuthHelper,
+	token: AuthHelper,
 	db_wtx: db::WriteTx,
 	db_rtx: db::ReadTx,
 ) -> (async_channel::Sender<()>, task::JoinHandle<()>) {
 	let http_client = http_client.clone();
 	let config = config.clone();
-	let token = token.clone();
 	let (tx, rx) = async_channel::bounded(10);
 	let handle = task::spawn(async move {
 		new_batch_processor(http_client, config, token, rx, db_wtx, db_rtx).await

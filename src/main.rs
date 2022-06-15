@@ -102,7 +102,7 @@ async fn main() {
 	let (processor_tx, proc_handle) = batch_processor::init_batch_processor(
 		&client,
 		&config,
-		&token_auth,
+		token_auth,
 		wtx.clone(),
 		rtx.clone(),
 	);
