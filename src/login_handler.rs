@@ -37,6 +37,7 @@ const SESSION_EXPIRY: u64 = 60 * 60 * 8; //eight hours
 pub struct User {
 	pub id: String,
 	pub email: Option<String>,
+	#[serde(skip)]
 	pub phc_hash: String,
 	pub reset_required: bool,
 	pub admin: bool,
@@ -279,7 +280,7 @@ impl SessionManager {
 		Err(SessionFailure::AuthFailed)
 	}
 
-	pub fn verify_admin_session_token(&self, token: &str) -> Result<User, SessionFailure> {
+	fn verify_admin_session_token(&self, token: &str) -> Result<User, SessionFailure> {
 		let user = self.verify_session_token(token)?;
 		match user.admin {
 			true => Ok(user),
@@ -324,7 +325,10 @@ impl SessionManager {
 		let temp_password = base64::encode(thread_rng().gen::<TempPassword>());
 		match argon2::hash_encoded(
 			temp_password.as_bytes(),
-			&thread_rng().gen::<Salt>(),
+			&{
+				let salt = thread_rng().gen::<Salt>();
+				salt
+			},
 			&CONFIG,
 		) {
 			Err(_) => Err(SessionFailure::InternalError),
@@ -348,6 +352,19 @@ impl SessionManager {
 					_ => Err(SessionFailure::InternalError),
 				}
 			}
+		}
+	}
+
+	pub async fn delete_user(&self, token: &str, id: String) -> Result<(), SessionFailure> {
+		self.verify_admin_session_token(token)?;
+		let (tx, rx) = oneshot::channel();
+		self.db_wtx
+			.send((WriteAction::DeleteUser(id), tx))
+			.unwrap_or_default();
+		match rx.await {
+			Ok(Ok(_)) => Ok(()),
+			Ok(Err(WFail::NoRecord)) => Err(SessionFailure::NoUser),
+			_ => Err(SessionFailure::InternalError),
 		}
 	}
 

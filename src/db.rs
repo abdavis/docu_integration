@@ -280,7 +280,17 @@ fn database_writer(
 								},
 								Err(_) => Err(WFail::DbError("Unable to prepare user update stmt".into()))
 							}
-					},
+					}
+					WriteAction::DeleteUser(username) => {
+						match tran.prepare_cached("DELETE FROM users WHERE id = :id"){
+							Ok(mut delete_user) => match delete_user.execute(named_params!{":id": username}){
+								Ok(1) => Ok(0),
+								Ok(0) => Err(WFail::NoRecord),
+								_ => Err(WFail::DbError("Unable to delete user".into())),
+							}
+							Err(_) => Err(WFail::DbError("Unable to prepare delete user stmt".into()))
+						}
+					}
 					WriteAction::ResetPassword{id,phc_hash} => {
 						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = TRUE WHERE id = :id"){
 							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
@@ -685,6 +695,8 @@ pub enum WriteAction {
 	CreateUser(crate::login_handler::User),
 
 	UpdateUser(crate::login_handler::User),
+
+	DeleteUser(String),
 
 	ResetPassword {
 		id: String,

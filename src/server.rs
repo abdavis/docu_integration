@@ -170,6 +170,7 @@ async fn server(
 			},
 		);
 
+	let session_manager4 = session_manager3.clone();
 	let websocket_individual = warp::path!("individual" / u32)
 		.and(warp::ws())
 		.and(warp::cookie::optional("session"))
@@ -337,12 +338,88 @@ async fn server(
 			}
 		});
 
+	let session_manager5 = session_manager4.clone();
+	let get_users = warp::path::end()
+		.and(warp::get())
+		.and(warp::cookie::optional("session"))
+		.then(move |maybe_cookie: Option<String>| {
+			let session_manager4 = session_manager4.clone();
+			async move {
+				match maybe_cookie {
+					None => {
+						warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+							.into_response()
+					}
+					Some(cookie) => match session_manager4.get_users(&cookie).await {
+						Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+							.into_response(),
+						Ok(users) => warp::reply::json(&users).into_response(),
+					},
+				}
+			}
+		});
+
+	let session_manager6 = session_manager5.clone();
+	let create_user = warp::post()
+		.and(warp::path::end())
+		.and(warp::cookie::optional("session"))
+		.and(warp::body::json())
+		.then(move |maybe_cookie: Option<String>, new_user: NewUser| {
+			let session_manager5 = session_manager5.clone();
+			async move {
+				match maybe_cookie {
+					None => {
+						warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+							.into_response()
+					}
+					Some(cookie) => match session_manager5
+						.create_user(&cookie, new_user.user_name, new_user.email, new_user.admin)
+						.await
+					{
+						Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+							.into_response(),
+						Ok(temp_pass) => temp_pass.into_response(),
+					},
+				}
+			}
+		});
+
+	let delete_user = warp::delete()
+		.and(warp::path!(String))
+		.and(warp::cookie::optional("session"))
+		.then(move |user, maybe_cookie: Option<String>| {
+			let session_manager6 = session_manager6.clone();
+			async move {
+				match maybe_cookie {
+					None => {
+						warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+							.into_response()
+					}
+					Some(cookie) => match session_manager6.delete_user(&cookie, user).await {
+						Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+							.into_response(),
+						Ok(_) => warp::reply().into_response(),
+					},
+				}
+			}
+		});
+
+	let users = warp::path("users").and(get_users.or(create_user).or(delete_user));
+
+	#[derive(Deserialize)]
+	struct NewUser {
+		user_name: String,
+		email: Option<String>,
+		admin: bool,
+	}
+
 	let api = warp::path("api").and(
 		webhook
 			.or(new_batch)
 			.or(websocket_filter)
 			.or(login_filter)
 			.or(change_pswd_filter)
+			.or(users)
 			.or(hello),
 	);
 
