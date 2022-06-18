@@ -14,6 +14,8 @@ mod oauth;
 mod server;
 mod websocket_handler;
 
+const DB_SCHEMA: &'static str = include_str!("schema.sql");
+
 #[tokio::main]
 async fn main() {
 	let config: Config =
