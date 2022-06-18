@@ -408,6 +408,7 @@ async fn server(
 		reset_required: bool,
 		admin: bool,
 	}
+	let session_manager8 = session_manager7.clone();
 	let update_user = warp::put()
 		.and(warp::path!(String))
 		.and(warp::cookie::optional("session"))
@@ -442,6 +443,26 @@ async fn server(
 				}
 			},
 		);
+
+	let reset_user = warp::post()
+		.and(warp::path!(String / "reset_password"))
+		.and(warp::cookie::optional("session"))
+		.then(move |id: String, maybe_cookie: Option<String>| {
+			let session_manager8 = session_manager8.clone();
+			async move {
+				match maybe_cookie {
+					None => {
+						warp::reply::with_status("Session cookie missing", StatusCode::UNAUTHORIZED)
+							.into_response()
+					}
+					Some(cookie) => match session_manager8.reset_password(&cookie, id).await {
+						Err(err) => warp::reply::with_status(err.to_string(), err.to_status_code())
+							.into_response(),
+						Ok(new_psswd) => format!("{{temp_password: {new_psswd}}}").into_response(),
+					},
+				}
+			}
+		});
 
 	let users = warp::path("users").and(get_users.or(create_user).or(delete_user).or(update_user));
 

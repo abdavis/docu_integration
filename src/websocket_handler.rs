@@ -15,7 +15,7 @@ pub struct ConnectorMsg {
 // ping interval, in seconds
 const PING_INTERVAL: u64 = 600;
 
-//loop update min interval in
+//loop update min interval
 const UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub struct DbUpdater {

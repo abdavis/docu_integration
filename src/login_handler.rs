@@ -396,7 +396,10 @@ impl SessionManager {
 		let new_password = base64::encode(thread_rng().gen::<TempPassword>());
 		match argon2::hash_encoded(
 			new_password.as_bytes(),
-			&thread_rng().gen::<TempPassword>(),
+			&{
+				let salt = thread_rng().gen::<TempPassword>();
+				salt
+			},
 			&CONFIG,
 		) {
 			Err(_) => Err(SessionFailure::InternalError),
