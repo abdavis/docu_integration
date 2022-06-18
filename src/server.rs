@@ -384,6 +384,7 @@ async fn server(
 			}
 		});
 
+	let session_manager7 = session_manager6.clone();
 	let delete_user = warp::delete()
 		.and(warp::path!(String))
 		.and(warp::cookie::optional("session"))
@@ -404,7 +405,48 @@ async fn server(
 			}
 		});
 
-	let users = warp::path("users").and(get_users.or(create_user).or(delete_user));
+	#[derive(Deserialize)]
+	struct Update {
+		email: Option<String>,
+		reset_required: bool,
+		admin: bool,
+	}
+	let update_user = warp::put()
+		.and(warp::path!(String))
+		.and(warp::cookie::optional("session"))
+		.and(warp::body::json())
+		.then(
+			move |id: String, maybe_cookie: Option<String>, update: Update| {
+				let session_manager7 = session_manager7.clone();
+				async move {
+					match maybe_cookie {
+						None => warp::reply::with_status(
+							"Session cookie missing",
+							StatusCode::UNAUTHORIZED,
+						)
+						.into_response(),
+						Some(cookie) => match session_manager7
+							.update_user(
+								&cookie,
+								id,
+								update.email,
+								update.reset_required,
+								update.admin,
+							)
+							.await
+						{
+							Ok(()) => warp::reply().into_response(),
+							Err(err) => {
+								warp::reply::with_status(err.to_string(), err.to_status_code())
+									.into_response()
+							}
+						},
+					}
+				}
+			},
+		);
+
+	let users = warp::path("users").and(get_users.or(create_user).or(delete_user).or(update_user));
 
 	#[derive(Deserialize)]
 	struct NewUser {

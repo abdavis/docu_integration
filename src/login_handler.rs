@@ -296,12 +296,6 @@ impl SessionManager {
 		}
 	}
 
-	pub fn logout_everywhere(&self, token: &str) {
-		if let Ok(usr) = self.verify_session_token(token) {
-			self.map.retain(|_, v| v.user.id != usr.id);
-		}
-	}
-
 	pub async fn get_users(&self, token: &str) -> Result<Vec<User>, SessionFailure> {
 		self.verify_admin_session_token(token)?;
 		let (tx, rx) = oneshot::channel();
@@ -360,6 +354,35 @@ impl SessionManager {
 		let (tx, rx) = oneshot::channel();
 		self.db_wtx
 			.send((WriteAction::DeleteUser(id), tx))
+			.unwrap_or_default();
+		match rx.await {
+			Ok(Ok(_)) => Ok(()),
+			Ok(Err(WFail::NoRecord)) => Err(SessionFailure::NoUser),
+			_ => Err(SessionFailure::InternalError),
+		}
+	}
+
+	pub async fn update_user(
+		&self,
+		token: &str,
+		id: String,
+		email: Option<String>,
+		reset_required: bool,
+		admin: bool,
+	) -> Result<(), SessionFailure> {
+		self.verify_admin_session_token(token)?;
+		let (tx, rx) = oneshot::channel();
+		self.db_wtx
+			.send((
+				WriteAction::UpdateUser(User {
+					id,
+					email,
+					reset_required,
+					admin,
+					phc_hash: Default::default(),
+				}),
+				tx,
+			))
 			.unwrap_or_default();
 		match rx.await {
 			Ok(Ok(_)) => Ok(()),
