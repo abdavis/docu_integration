@@ -42,11 +42,11 @@ async fn auth_server(
 	let mut token = ("".to_string(), Instant::now());
 	while let Ok(tx) = rx.recv().await {
 		if token.1 > Instant::now() {
-			tx.send(token.clone());
+			tx.send(token.clone()).unwrap_or_default();
 		} else {
 			claims.update();
 			token = renew_token(&head, &claims, &key, &http_client).await;
-			tx.send(token.clone());
+			tx.send(token.clone()).unwrap_or_default();
 		}
 	}
 
@@ -105,7 +105,7 @@ impl AuthHelper {
 	pub async fn get(&mut self) -> String {
 		if self.expire <= Instant::now() {
 			let (oneshottx, oneshotrx) = oneshot::channel();
-			self.tx.send(oneshottx).await;
+			self.tx.send(oneshottx).await.unwrap_or_default();
 			let new_token = oneshotrx.await.unwrap();
 			self.token = new_token.0;
 			self.expire = new_token.1;

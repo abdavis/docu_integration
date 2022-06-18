@@ -2,7 +2,7 @@ use crate::db::{self, ReadTx, WFail, WriteAction, WriteTx};
 use crate::login_handler::{LoginResult, PasswordManager, SessionFailure, SessionManager};
 use crate::websocket_handler::{self, connect, ConnectorMsg, Resource};
 use ring::{constant_time::verify_slices_are_equal, hmac};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -20,19 +20,16 @@ const SESSION_COOKIE_AGE: u64 = 60 * 60 * 8;
 pub fn create_server(
 	config: &crate::Config,
 	db_wtx: &WriteTx,
-	db_rtx: &ReadTx,
 	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
 	password_manager: PasswordManager,
 	session_manager: SessionManager,
 ) -> task::JoinHandle<()> {
 	let config = config.clone();
 	let wtx = db_wtx.clone();
-	let rtx = db_rtx.clone();
 	task::spawn(async move {
 		server(
 			config,
 			wtx,
-			rtx,
 			ws_handler_tx,
 			password_manager,
 			session_manager,
@@ -43,7 +40,6 @@ pub fn create_server(
 async fn server(
 	config: crate::Config,
 	db_wtx: WriteTx,
-	db_rtx: ReadTx,
 	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
 	password_manager: PasswordManager,
 	session_manager: SessionManager,
@@ -157,12 +153,13 @@ async fn server(
 					Ok(_) => {
 						let ws_handler_tx = ws_handler_2.clone();
 						ws.on_upgrade(move |socket| async move {
-							let result = ws_handler_tx
+							ws_handler_tx
 								.send(ConnectorMsg {
 									channel: connect(socket),
 									resource: Resource::Batch(batch_id),
 								})
-								.await;
+								.await
+								.unwrap_or_default();
 						})
 						.into_response()
 					}

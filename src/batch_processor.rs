@@ -82,19 +82,21 @@ async fn new_batch_processor(
 			.await;
 
 		match request {
-			Err(error) => {
+			Err(_) => {
 				let (tx, rx) = oneshot::channel();
-				db_writer.send((
-					db::WriteAction::UpdateStatusWithId {
-						id: envelope.id,
-						api_err: Some("Unable to connect to docusign api".into()),
-						gid: None,
-						status: "cancelled".into(),
-						void_reason: None,
-					},
-					tx,
-				));
-				if let Err(error) = rx.await {
+				db_writer
+					.send((
+						db::WriteAction::UpdateStatusWithId {
+							id: envelope.id,
+							api_err: Some("Unable to connect to docusign api".into()),
+							gid: None,
+							status: "cancelled".into(),
+							void_reason: None,
+						},
+						tx,
+					))
+					.unwrap_or_default();
+				if let Err(_) = rx.await {
 					//TODO: log if db didn't work
 					println!("db write failed")
 				}
@@ -103,31 +105,32 @@ async fn new_batch_processor(
 				201 => match resp.json::<Sent>().await {
 					Ok(sent_envelope) => {
 						let (tx, rx) = oneshot::channel();
-						db_writer.send((
-							db::WriteAction::UpdateStatusWithId {
-								id: envelope.id,
-								gid: Some(sent_envelope.envelope_id),
-								status: sent_envelope.status,
-								api_err: None,
-								void_reason: None,
-							},
-							tx,
-						));
+						db_writer
+							.send((
+								db::WriteAction::UpdateStatusWithId {
+									id: envelope.id,
+									gid: Some(sent_envelope.envelope_id),
+									status: sent_envelope.status,
+									api_err: None,
+									void_reason: None,
+								},
+								tx,
+							))
+							.unwrap_or_default();
 
 						match rx.await {
 							Ok(result) => {
-								if let Err(msg) = result {
+								if let Err(_) = result {
 									//todo: log write error
 								}
 							}
-							Err(msg) => (), //todo: log oneshot channel error
+							Err(_) => (), //todo: log oneshot channel error
 						}
 						println!("Docusign sent!")
 					}
 					Err(error) => println!("Unable to parse json body: {error}"),
 				},
 				400..=499 => {
-					let headers = resp.headers();
 					println!("{resp:?}");
 					match resp.json::<ErrorDetails>().await {
 						Ok(error_detail) => {
@@ -149,6 +152,7 @@ async fn new_batch_processor(
 		}
 		#[derive(Deserialize, Debug)]
 		#[serde(rename_all = "camelCase")]
+		#[allow(dead_code)]
 		struct ErrorDetails {
 			error_code: String,
 			message: String,
@@ -289,6 +293,7 @@ struct TabValue {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(non_snake_case)]
 struct EventNotification {
 	url: String,
 	require_acknowledgment: String,

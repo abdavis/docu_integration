@@ -288,13 +288,13 @@ impl SessionManager {
 		}
 	}
 
-	pub fn logout(&self, token: &str) {
-		if let Ok(decoded_vec) = base64::decode(token) {
-			if let Ok::<MapKey, _>(key) = decoded_vec.try_into() {
-				self.map.remove(&key);
-			}
-		}
-	}
+	// pub fn logout(&self, token: &str) {
+	// 	if let Ok(decoded_vec) = base64::decode(token) {
+	// 		if let Ok::<MapKey, _>(key) = decoded_vec.try_into() {
+	// 			self.map.remove(&key);
+	// 		}
+	// 	}
+	// }
 
 	pub async fn get_users(&self, token: &str) -> Result<Vec<User>, SessionFailure> {
 		self.verify_admin_session_token(token)?;

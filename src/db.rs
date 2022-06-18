@@ -58,7 +58,8 @@ fn database_writer(
 			Err(_) => {
 				tx.send(WriteResult::Err(WFail::DbError(
 					"Unable to begin transaction".into(),
-				)));
+				)))
+				.unwrap_or_default();
 			}
 			Ok(tran) => {
 				let mut dups = 0;

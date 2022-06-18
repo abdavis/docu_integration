@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot};
 use tokio::task;
-use tokio::time::{sleep_until, Duration, Instant};
+use tokio::time::{sleep, sleep_until, Duration, Instant};
 use warp::ws::{Message, WebSocket};
 pub struct ConnectorMsg {
 	pub channel: oneshot::Sender<DbUpdater>,
@@ -14,6 +14,10 @@ pub struct ConnectorMsg {
 }
 // ping interval, in seconds
 const PING_INTERVAL: u64 = 600;
+
+//loop update min interval in
+const UPDATE_INTERVAL: Duration = Duration::from_secs(10);
+
 pub struct DbUpdater {
 	receive_channel: broadcast::Receiver<String>,
 	initial_json: String,
@@ -105,6 +109,9 @@ async fn updater_task(
 	close_channel: async_channel::Sender<UpdaterCloseMsg>,
 	resource: Resource,
 ) {
+	fn empty(rx: &mut broadcast::Receiver<()>) {
+		while let Ok(_) = rx.try_recv() {}
+	}
 	//first time setup, once we have sent one msg the loop handles future connections.
 	if let Ok(new_subscriber_chnl) = incoming.recv().await {
 		println!("got first new subscriber");
@@ -142,12 +149,14 @@ async fn updater_task(
 										Err(_) => {println!("Exiting updater loop, db update channel is closed"); break UpdaterCloseMsg{resource, leftover: None}},
 										Ok(_) => {
 											let (tx, rx) = oneshot::channel();
+											empty(&mut db_updates);
 											db_reader_channel.send((read_query.clone(), tx)).unwrap_or_default();
 											match rx.await {
 												Ok(Ok(res)) => match serde_json::to_string(&res) {
 													Ok(str) => {
 														json_state = str;
 														updater_tx.send(json_state.clone()).unwrap_or_default();
+														sleep(UPDATE_INTERVAL).await;
 													}
 													Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
 												}

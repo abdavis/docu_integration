@@ -1,11 +1,8 @@
 use async_channel;
-use serde::{Deserialize, Serialize};
-use serde_json;
-use std::{fs, thread};
+use serde::Deserialize;
+use std::fs;
 use tokio::{self, sync::oneshot, task};
 use toml;
-
-use crate::db::BatchDetail;
 
 mod batch_processor;
 mod db;
@@ -22,7 +19,7 @@ async fn main() {
 		toml::from_str(&fs::read_to_string("config.toml").expect("No Config File!"))
 			.expect("Improper Config");
 
-	let mut token_auth = oauth::auth_initiate(&config);
+	let token_auth = oauth::auth_initiate(&config);
 
 	let (wtx, rtx, db_update_tx, handles) = db::init();
 	let (tx, rx) = oneshot::channel();
@@ -94,7 +91,8 @@ async fn main() {
 			],
 		}),
 		tx,
-	));
+	))
+	.unwrap_or_default();
 	let db_result = rx.await;
 	println!("db write status: {db_result:?}");
 	let client = reqwest::Client::new();
@@ -115,7 +113,6 @@ async fn main() {
 	tasks.push(server::create_server(
 		&config,
 		&wtx,
-		&rtx,
 		ws_handler_tx,
 		password_manager,
 		session_manager,
@@ -126,16 +123,16 @@ async fn main() {
 		db_update_tx,
 	)));
 
-	processor_tx.send(()).await;
+	processor_tx.send(()).await.unwrap_or_default();
 	drop(processor_tx);
 	drop(wtx);
 	for task in tasks {
-		task.await;
+		task.await.unwrap_or_default();
 	}
 	//println!("{:?}", rx.await);
 	task::block_in_place(|| {
 		for handle in handles {
-			handle.join();
+			handle.join().unwrap_or_default();
 		}
 	})
 }
@@ -152,6 +149,7 @@ struct Network {
 }
 
 #[derive(Deserialize, Clone)]
+#[allow(non_snake_case)]
 pub struct DocusignCredentials {
 	hmac_key: String,
 	api_key: String,
