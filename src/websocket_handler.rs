@@ -128,7 +128,8 @@ async fn updater_task(
 			match temp_rx.await {
 				Ok(Ok(rsuccess)) => {
 					println!("got msg from db");
-					if let Ok(mut json_state) = serde_json::to_string(&rsuccess) {
+					let mut current_state = rsuccess;
+					if let Ok(mut json_state) = serde_json::to_string(&current_state) {
 						let (updater_tx, updater_rx) = broadcast::channel(100);
 						new_subscriber_chnl
 							.send(DbUpdater {
@@ -152,14 +153,19 @@ async fn updater_task(
 											empty(&mut db_updates);
 											db_reader_channel.send((read_query.clone(), tx)).unwrap_or_default();
 											match rx.await {
-												Ok(Ok(res)) => match serde_json::to_string(&res) {
-													Ok(str) => {
-														json_state = str;
-														updater_tx.send(json_state.clone()).unwrap_or_default();
-														sleep(UPDATE_INTERVAL).await;
+												Ok(Ok(res)) => {
+													if res != current_state {
+														current_state = res;
+														match serde_json::to_string(&current_state) {
+														Ok(str) => {
+															json_state = str;
+															updater_tx.send(json_state.clone()).unwrap_or_default();
+														}
+														Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
 													}
-													Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
 												}
+												sleep(UPDATE_INTERVAL).await;
+											}
 												_=> {println!("Exiting updater loop, new client oneshot channel error or db read error"); break UpdaterCloseMsg{resource, leftover: None}},
 											}
 										}

@@ -705,7 +705,7 @@ pub enum WriteAction {
 	},
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct Beneficiary {
 	pub kind: BeneficiaryType,
 	pub name: String,
@@ -717,7 +717,7 @@ pub struct Beneficiary {
 	pub percent: u32,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub enum BeneficiaryType {
 	Primary,
 	Contingent,
@@ -747,7 +747,7 @@ impl rusqlite::types::FromSql for BeneficiaryType {
 		Err(rusqlite::types::FromSqlError::InvalidType)
 	}
 }
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct AuthorizedUser {
 	pub name: String,
 	pub dob: String,
@@ -778,7 +778,7 @@ pub enum ReadAction {
 
 pub type ReadResult = Result<RSuccess, String>;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub enum RSuccess {
 	ActiveBatches(Vec<BatchSummary>),
 	BatchDetails(Vec<BatchDetail>),
@@ -789,7 +789,7 @@ pub enum RSuccess {
 	Users(Vec<crate::login_handler::User>),
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct BatchDetail {
 	pub ssn: u32,
 	pub primary_acct: Option<u32>,
@@ -805,7 +805,7 @@ pub struct BatchDetail {
 	pub ignore_error: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct EnvelopeDetail {
 	pub id: i64,
 	pub gid: Option<String>,
@@ -875,7 +875,7 @@ pub struct Acct {
 	pub host_err: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct BatchSummary {
 	pub id: i64,
 	pub name: String,
