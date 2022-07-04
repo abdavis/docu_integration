@@ -47,9 +47,17 @@ pub async fn connector_task(
 			//new connections
 			maybe_new_connect = rx.recv() => {
 				match maybe_new_connect {
-					Err(_) => {println!("Exiting connecter loop, close_rx channel is closed"); break},
+					Err(_) => {
+						println!("Exiting connecter loop, close_rx channel is closed");
+						//drop map and close_tx so the next part can actually finish
+						drop(map);
+						drop(close_tx);
+						//wait until all updater tasks have exited before returning
+						while let Ok(_) = close_rx.recv().await{}
+						break
+					},
 					Ok(new_connect) => {
-						let (updater_tx, _updater_rx) = map.entry(new_connect.resource).or_insert({
+						let (updater_tx, _) = map.entry(new_connect.resource).or_insert({
 							let (tx, rx) = async_channel::bounded(100);
 							task::spawn({
 								let rx = rx.clone();
@@ -180,7 +188,13 @@ async fn updater_task(
 											}).unwrap_or(());},
 											None => {println!("Exiting updater loop, all clients disconnected while adding a new client"); break UpdaterCloseMsg{resource, leftover: Some(new_client)}}
 										}
-										Err(_) => {println!("Exiting updater loop, new_client_channel error"); break UpdaterCloseMsg{resource, leftover: None}}
+										Err(_) => {
+											println!("Exiting updater loop, new_client_channel error");
+											//wait until all clients are disconnected before returning
+											drop(updater_tx);
+											subscriber_status_rx.await;
+											break UpdaterCloseMsg{resource, leftover: None}
+										}
 									}
 								}
 								//Close out of loop if all clients drop their handle
