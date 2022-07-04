@@ -64,7 +64,7 @@ create table envelopes(
         )
     )
 ) strict;
-create index envelope_ssn on envelopes(ssn, date_created);
+create unique index envelope_ssn on envelopes(ssn, date_created);
 create unique index envelopes_restrict_active on envelopes(ssn)
 where status is null
     or status not in ('completed', 'declined', 'voided', 'cancelled');

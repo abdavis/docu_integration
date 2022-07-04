@@ -333,7 +333,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 		.expect("Setting synchronous mode failed");
 	conn.pragma_update(None, "temp_store", "memory")
 		.expect("setting temp_store failed");
-	conn.pragma_update(None, "mmap_size", 30000000000 as u64)
+	conn.pragma_update(None, "mmap_size", 30000000000u64)
 		.expect("unable to set mmap size");
 
 	for (event, tx) in rx {
