@@ -705,7 +705,7 @@ pub enum WriteAction {
 	},
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Beneficiary {
 	pub kind: BeneficiaryType,
 	pub name: String,
@@ -717,7 +717,7 @@ pub struct Beneficiary {
 	pub percent: u32,
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub enum BeneficiaryType {
 	Primary,
 	Contingent,
@@ -747,7 +747,7 @@ impl rusqlite::types::FromSql for BeneficiaryType {
 		Err(rusqlite::types::FromSqlError::InvalidType)
 	}
 }
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct AuthorizedUser {
 	pub name: String,
 	pub dob: String,
@@ -789,7 +789,10 @@ pub enum RSuccess {
 	Users(Vec<crate::login_handler::User>),
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+pub trait Key {
+	fn key(&self) -> i64;
+}
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct BatchDetail {
 	pub ssn: u32,
 	pub primary_acct: Option<u32>,
@@ -804,8 +807,13 @@ pub struct BatchDetail {
 	pub api_err: Option<String>,
 	pub ignore_error: bool,
 }
+impl Key for BatchDetail {
+	fn key(&self) -> i64 {
+		self.ssn.into()
+	}
+}
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct EnvelopeDetail {
 	pub id: i64,
 	pub gid: Option<String>,
@@ -836,6 +844,11 @@ pub struct EnvelopeDetail {
 	pub is_married: Option<bool>,
 	pub beneficiaries: Vec<Beneficiary>,
 	pub auth_users: Vec<AuthorizedUser>,
+}
+impl Key for EnvelopeDetail {
+	fn key(&self) -> i64 {
+		self.id
+	}
 }
 #[derive(Deserialize)]
 pub struct BatchData {
@@ -875,7 +888,7 @@ pub struct Acct {
 	pub host_err: Option<String>,
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct BatchSummary {
 	pub id: i64,
 	pub name: String,
@@ -886,4 +899,9 @@ pub struct BatchSummary {
 	pub working: u32,
 	pub complete: u32,
 	pub err: u32,
+}
+impl Key for BatchSummary {
+	fn key(&self) -> i64 {
+		self.id
+	}
 }

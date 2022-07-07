@@ -1,6 +1,7 @@
 use crate::db::{self, ReadAction};
 use futures::prelude::*;
 use rand::{thread_rng, Rng};
+use serde::Serialize;
 use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -117,9 +118,6 @@ async fn updater_task(
 	close_channel: async_channel::Sender<UpdaterCloseMsg>,
 	resource: Resource,
 ) {
-	fn empty(rx: &mut broadcast::Receiver<()>) {
-		while let Ok(_) = rx.try_recv() {}
-	}
 	//first time setup, once we have sent one msg the loop handles future connections.
 	if let Ok(new_subscriber_chnl) = incoming.recv().await {
 		println!("got first new subscriber");
@@ -162,18 +160,22 @@ async fn updater_task(
 											db_reader_channel.send((read_query.clone(), tx)).unwrap_or_default();
 											match rx.await {
 												Ok(Ok(res)) => {
-													if res != current_state {
-														current_state = res;
-														match serde_json::to_string(&current_state) {
-														Ok(str) => {
-															json_state = str;
-															updater_tx.send(json_state.clone()).unwrap_or_default();
+													match diff(&res, &current_state) {
+														Err(_) => break UpdaterCloseMsg{resource, leftover: None},
+														Ok(None) => {},
+														Ok(Some(changes)) => {
+															current_state = res;
+															match serde_json::to_string(&current_state) {
+																Ok(new_json) => {
+																	json_state = new_json;
+																	updater_tx.send(changes).unwrap_or_default();
+																}
+																Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
+															}
 														}
-														Err(_) => {println!("Exiting updater loop, unable to parse db response"); break UpdaterCloseMsg{resource, leftover: None}}
 													}
+													sleep(UPDATE_INTERVAL).await;
 												}
-												sleep(UPDATE_INTERVAL).await;
-											}
 												_=> {println!("Exiting updater loop, new client oneshot channel error or db read error"); break UpdaterCloseMsg{resource, leftover: None}},
 											}
 										}
@@ -192,7 +194,7 @@ async fn updater_task(
 											println!("Exiting updater loop, new_client_channel error");
 											//wait until all clients are disconnected before returning
 											drop(updater_tx);
-											subscriber_status_rx.await;
+											subscriber_status_rx.await.unwrap_or_default();
 											break UpdaterCloseMsg{resource, leftover: None}
 										}
 									}
@@ -225,6 +227,83 @@ async fn updater_task(
 				})
 				.await
 				.unwrap_or_default();
+		}
+	}
+	fn empty(rx: &mut broadcast::Receiver<()>) {
+		while let Ok(_) = rx.try_recv() {}
+	}
+	//finds the diff between two vecs and creats a json string
+	//vecs MUST be in ascending order by key for this to work
+	fn diff(new: &db::RSuccess, old: &db::RSuccess) -> Result<Option<String>, ()> {
+		fn internal_diff<T: crate::db::Key + PartialEq + Serialize + Clone>(
+			new: &Vec<T>,
+			old: &Vec<T>,
+		) -> Option<String> {
+			#[derive(Serialize, Default)]
+			struct Diff<A: Serialize> {
+				modify: Vec<A>,
+				add: Vec<A>,
+				delete: Vec<i64>,
+			}
+			let mut diff: Diff<T> = Diff {
+				modify: vec![],
+				add: vec![],
+				delete: vec![],
+			};
+
+			let mut old_iter = old.iter();
+			let mut new_iter = new.iter();
+			let mut old_curr = old_iter.next();
+			let mut new_curr = new_iter.next();
+			loop {
+				match (old_curr, new_curr) {
+					(None, None) => break,
+					(Some(older), None) => {
+						diff.delete.push(older.key());
+						old_curr = old_iter.next();
+					}
+					(None, Some(newer)) => {
+						diff.add.push(newer.clone());
+						new_curr = new_iter.next();
+					}
+					(Some(older), Some(newer)) => match (older.key(), newer.key()) {
+						(o, n) if o == n => {
+							if older != newer {
+								diff.modify.push(newer.clone());
+							}
+							old_curr = old_iter.next();
+							new_curr = new_iter.next();
+						}
+						(o, n) if o > n => {
+							diff.add.push(newer.clone());
+							new_curr = new_iter.next();
+						}
+						(o, _) => {
+							diff.delete.push(o);
+							old_curr = old_iter.next();
+						}
+					},
+				}
+			}
+
+			if diff.modify.len() == 0 && diff.add.len() == 0 && diff.delete.len() == 0 {
+				None
+			} else {
+				Some(serde_json::to_string(&diff).unwrap())
+			}
+		}
+
+		match (new, old) {
+			(db::RSuccess::ActiveBatches(new), db::RSuccess::ActiveBatches(old)) => {
+				Ok(internal_diff(&new, &old))
+			}
+			(db::RSuccess::BatchDetails(new), db::RSuccess::BatchDetails(old)) => {
+				Ok(internal_diff(&new, &old))
+			}
+			(db::RSuccess::EnvelopeDetails(new), db::RSuccess::EnvelopeDetails(old)) => {
+				Ok(internal_diff(&new, &old))
+			}
+			_ => Err(()),
 		}
 	}
 }
