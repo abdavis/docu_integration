@@ -1,4 +1,5 @@
 use crate::db::{self, ReadAction};
+use axum::extract::ws::{Message, WebSocket};
 use futures::prelude::*;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
@@ -8,7 +9,6 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot};
 use tokio::task;
 use tokio::time::{sleep, sleep_until, Duration, Instant};
-use warp::ws::{Message, WebSocket};
 pub struct ConnectorMsg {
 	pub channel: oneshot::Sender<DbUpdater>,
 	pub resource: Resource,
@@ -317,7 +317,7 @@ pub fn connect(ws: WebSocket) -> oneshot::Sender<DbUpdater> {
 	task::spawn(async move {
 		if let Ok(mut database_updates) = orx.await {
 			let (mut tx, mut rx) = ws.split();
-			if let Ok(_) = tx.send(Message::text(database_updates.initial_json)).await {
+			if let Ok(_) = tx.send(Message::Text(database_updates.initial_json)).await {
 				let mut ping_deadline = Instant::now()
 					+ Duration::from_millis(
 						PING_INTERVAL * 1000 + thread_rng().gen_range(0..(PING_INTERVAL * 500)),
@@ -330,21 +330,21 @@ pub fn connect(ws: WebSocket) -> oneshot::Sender<DbUpdater> {
 						update = database_updates.receive_channel.recv() => {
 							match update {
 								Err(_) => break,
-								Ok(s) => if let Err(_) = tx.send(Message::text(s)).await {break}
+								Ok(s) => if let Err(_) = tx.send(Message::Text(s)).await {break}
 							}
 						}
 
 						ws_receive = rx.next() => {
 							match ws_receive {
 								None => {println!("Websocked receiver closed"); break},
-								Some(Ok(msg)) => if msg.is_pong() {pong_deadline = Instant::now() + Duration::from_secs(PING_INTERVAL * 2);},
+								Some(Ok(msg)) => if let Message::Pong(_) = msg {pong_deadline = Instant::now() + Duration::from_secs(PING_INTERVAL * 2);},
 								_=>()
 							}
 						}
 
 						_ = sleep_until(ping_deadline)
 							=> {
-								if let Err(_) = tx.send(Message::ping([])).await {
+								if let Err(_) = tx.send(Message::Ping(vec![])).await {
 									println!("exiting connect loop from timeout");
 									break
 								}
