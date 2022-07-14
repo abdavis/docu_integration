@@ -5,10 +5,12 @@ use tokio::{self, sync::oneshot, task};
 use toml;
 
 mod batch_processor;
+mod create_server;
 mod db;
 mod login_handler;
 mod oauth;
-mod server;
+//mod server;
+mod webhook;
 mod websocket_handler;
 
 const DB_SCHEMA: &'static str = include_str!("schema.sql");
@@ -110,22 +112,23 @@ async fn main() {
 	let (password_manager, session_manager) =
 		crate::login_handler::new(rtx.clone(), wtx.clone()).await;
 	let (ws_handler_tx, ws_handler_rx) = async_channel::bounded(1000);
-	tasks.push(server::create_server(
-		&config,
-		&wtx,
-		ws_handler_tx,
-		password_manager,
-		session_manager,
-	));
 	tasks.push(task::spawn(websocket_handler::connector_task(
 		ws_handler_rx,
-		rtx,
+		rtx.clone(),
 		db_update_tx,
 	)));
-
 	processor_tx.send(()).await.unwrap_or_default();
-	drop(processor_tx);
-	drop(wtx);
+	let (completed_tx, completed_rx) = async_channel::bounded(1);
+	let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+	tasks.push(task::spawn(create_server::run(
+		config,
+		wtx,
+		rtx,
+		processor_tx,
+		completed_tx,
+		shutdown_rx,
+	)));
+
 	for task in tasks {
 		task.await.unwrap_or_default();
 	}

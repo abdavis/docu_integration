@@ -229,9 +229,7 @@ impl NewEnvelope {
 				event_data: EventData {
 					version: "restv2.1".into(),
 					format: "json".into(),
-					include_data: vec!["tabs".into(), "recipients".into()],
 				},
-				include_envelope_void_reason: "true".into(),
 				include_HMAC: "true".into(),
 			},
 		};
@@ -301,7 +299,6 @@ struct EventNotification {
 	delivery_mode: String,
 	events: Vec<String>,
 	event_data: EventData,
-	include_envelope_void_reason: String,
 	include_HMAC: String,
 }
 #[derive(Serialize)]
@@ -309,5 +306,4 @@ struct EventNotification {
 struct EventData {
 	version: String,
 	format: String,
-	include_data: Vec<String>,
 }
