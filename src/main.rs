@@ -10,7 +10,6 @@ mod db;
 mod login_handler;
 mod oauth;
 //mod server;
-mod webhook;
 mod websocket_handler;
 
 const DB_SCHEMA: &'static str = include_str!("schema.sql");
@@ -124,6 +123,7 @@ async fn main() {
 		config,
 		wtx,
 		rtx,
+		ws_handler_tx,
 		processor_tx,
 		completed_tx,
 		shutdown_rx,

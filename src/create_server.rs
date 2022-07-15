@@ -2,12 +2,16 @@ use axum_server::{tls_rustls::RustlsConfig, Handle};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use tokio::task;
 
-use crate::{db, webhook, Config};
+use crate::{db, websocket_handler, Config};
+
+mod login;
+mod webhook;
 
 pub async fn run(
 	config: Config,
 	db_wtx: db::WriteTx,
 	db_rtx: db::ReadTx,
+	ws_handler_tx: async_channel::Sender<websocket_handler::ConnectorMsg>,
 	batch_processor_tx: async_channel::Sender<()>,
 	completed_processor_tx: async_channel::Sender<()>,
 	shutdown_signal: tokio::sync::broadcast::Receiver<()>,
@@ -37,6 +41,6 @@ async fn graceful_shutdown(
 	handle: Handle,
 	mut shutdown_signal: tokio::sync::broadcast::Receiver<()>,
 ) {
-	shutdown_signal.recv().await;
+	shutdown_signal.recv().await.unwrap_or_default();
 	handle.graceful_shutdown(Some(Duration::from_secs(10)));
 }

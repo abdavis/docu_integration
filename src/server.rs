@@ -479,15 +479,17 @@ async fn server(
 			.or(websocket_filter)
 			.or(login_filter)
 			.or(change_pswd_filter)
-			.or(users)
-			.or(hello),
+			.or(users),
 	);
 
-	warp::serve(api)
+	warp::serve(api.or(hello))
 		.tls()
 		.cert_path("cert/cert.pem")
 		.key_path("cert/key.pem")
-		.run(([127, 0, 0, 1], 8081))
+		.bind_with_graceful_shutdown(([0, 0, 0, 0], 8081), async {
+			tokio::signal::ctrl_c().await.unwrap();
+		})
+		.1
 		.await;
 
 	println!("Shutting down Server");

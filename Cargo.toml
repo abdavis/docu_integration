@@ -23,6 +23,6 @@ rand = "0.8.5"
 rust-argon2 = "1.0"
 dashmap = "5.3"
 axum = {version = "0.5", features = ["headers", "http2", "ws"]}
-axum-extra = {version = "0.3", features = ["cookie-signed"]}
 axum-macros = "0.2"
 axum-server = {version = "0.4", features = ["tls-rustls"]}
+lazy-static = "1.4"
