@@ -7,7 +7,7 @@ use toml;
 mod batch_processor;
 mod create_server;
 mod db;
-mod login_handler;
+//mod login_handler;
 mod oauth;
 //mod server;
 mod websocket_handler;
@@ -108,8 +108,6 @@ async fn main() {
 		rtx.clone(),
 	);
 	tasks.push(proc_handle);
-	let (password_manager, session_manager) =
-		crate::login_handler::new(rtx.clone(), wtx.clone()).await;
 	let (ws_handler_tx, ws_handler_rx) = async_channel::bounded(1000);
 	tasks.push(task::spawn(websocket_handler::connector_task(
 		ws_handler_rx,

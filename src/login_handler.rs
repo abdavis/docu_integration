@@ -33,16 +33,6 @@ const SESSION_TIMEOUT: u64 = 60 * 60; //one hour
 
 const SESSION_EXPIRY: u64 = 60 * 60 * 8; //eight hours
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
-pub struct User {
-	pub id: String,
-	pub email: Option<String>,
-	#[serde(skip)]
-	pub phc_hash: String,
-	pub reset_required: bool,
-	pub admin: bool,
-}
-
 struct Session {
 	user: User,
 	timeout: Instant,

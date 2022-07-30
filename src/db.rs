@@ -626,7 +626,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 							Ok(None) => Ok(RSuccess::User(None)),
 							Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3)){
 								(Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) => {
-									Ok(RSuccess::User(Some(crate::login_handler::User {id: user_id, email, phc_hash, reset_required, admin})))
+									Ok(RSuccess::User(Some(crate::create_server::login::User {id: user_id, email, phc_hash, reset_required, admin})))
 								}
 								_ => Err("type conversion error while getting user".into())
 							}
@@ -648,7 +648,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 									Ok(None) => break Ok(()),
 									Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4)){
 										(Ok(id), Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) =>
-											users.push(crate::login_handler::User{id, email, phc_hash, reset_required, admin}),
+											users.push(crate::create_server::login::User{id, email, phc_hash, reset_required, admin}),
 										_=> break Err("type conversion error while getting users in loop".into()),
 									}
 								}
@@ -693,9 +693,9 @@ pub enum WriteAction {
 		pdf: Vec<u8>,
 	},
 
-	CreateUser(crate::login_handler::User),
+	CreateUser(crate::create_server::login::User),
 
-	UpdateUser(crate::login_handler::User),
+	UpdateUser(crate::create_server::login::User),
 
 	DeleteUser(String),
 
@@ -778,15 +778,15 @@ pub enum ReadAction {
 
 pub type ReadResult = Result<RSuccess, String>;
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug)]
 pub enum RSuccess {
 	ActiveBatches(Vec<BatchSummary>),
 	BatchDetails(Vec<BatchDetail>),
 	EnvelopeDetails(Vec<EnvelopeDetail>),
 	OldBatches(Vec<BatchSummary>),
 	PdfBlob(Vec<u8>),
-	User(Option<crate::login_handler::User>),
-	Users(Vec<crate::login_handler::User>),
+	User(Option<crate::create_server::login::User>),
+	Users(Vec<crate::create_server::login::User>),
 }
 
 pub trait Key {
