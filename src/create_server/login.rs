@@ -10,7 +10,7 @@ use axum::{
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use lazy_static::lazy_static;
-use rand::{thread_rng, Rng};
+use rand::{distributions::Standard, rngs::adapter::ReseedingRng, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
 	cmp::min,
@@ -21,7 +21,7 @@ use tokio::{
 	time::{sleep, Duration},
 };
 
-use crate::db;
+use crate::db::{self, RSuccess};
 
 lazy_static! {
 	static ref JWT_KEY: [u8; 32] = thread_rng().gen();
@@ -46,6 +46,7 @@ const CONFIG: Config = Config {
 pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 	Router::new()
 		.route("auth/login", post(login_handler))
+		.route("auth/change_pswd", post(change_handler))
 		.route_layer(Extension((wtx, rtx)))
 }
 
@@ -54,11 +55,37 @@ struct Login {
 	user: String,
 	password: String,
 }
+#[derive(Deserialize)]
+struct ChangePassword {
+	user: String,
+	current_password: String,
+	old_password: String,
+}
+async fn change_handler(
+	Extension((wtx, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
+	Json(change): Json<ChangePassword>,
+) -> Response {
+	let sleep = sleep(Duration::from_secs(5));
+	let (tx, rx) = oneshot::channel();
+	rtx.send((
+		db::ReadAction::GetUser {
+			user_id: change.user,
+		},
+		tx,
+	)).unwrap_or_default();
+	match rx.await {
+		Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+		Ok(RSuccess::User(Some(user)))) => {
+
+		}
+	}
+}
 
 async fn login_handler(
 	Extension((_, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
 	Json(login): Json<Login>,
 ) -> Response {
+	let sleep = sleep(Duration::from_secs(5));
 	let (tx, rx) = oneshot::channel();
 	rtx.send((
 		db::ReadAction::GetUser {
@@ -67,7 +94,6 @@ async fn login_handler(
 		tx,
 	))
 	.unwrap_or_default();
-	let sleep = sleep(Duration::from_secs(5));
 	match rx.await {
 		Ok(Ok(db::RSuccess::User(Some(user)))) => {
 			match argon2::verify_encoded(&user.phc_hash, login.password.as_bytes()) {
@@ -115,6 +141,10 @@ async fn login_handler(
 			StatusCode::UNAUTHORIZED.into_response()
 		}
 	}
+}
+
+fn verify_password(pass: String, phc: String) -> Result<(), StatusCode> {
+	
 }
 
 #[derive(Debug, Serialize, Clone)]
