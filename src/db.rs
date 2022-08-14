@@ -244,12 +244,11 @@ fn database_writer(
 						}
 					}
 					WriteAction::CreateUser(user) => {
-						match tran.prepare_cached("INSERT INTO users (id, email, phc_passwd, reset_required, admin) VALUES (:id, :email, :phc_hash, :reset_required, :admin)"){
+						match tran.prepare_cached("INSERT INTO users (id, email, phc_passwd, reset_required, admin) VALUES (:id, :email, :phc_hash, TRUE, :admin)"){
 							Ok(mut user_insert) => match user_insert.execute(named_params!{
 								":id": user.id,
 								":email": user.email,
 								":phc_hash": user.phc_hash,
-								":reset_required": user.reset_required,
 								":admin": user.admin
 							}){
 								Ok(_) => Ok(0),
@@ -296,6 +295,19 @@ fn database_writer(
 						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = TRUE WHERE id = :id"){
 							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
 							Ok(mut reset_pass) => match reset_pass.execute(named_params!{
+								":phc_hash": phc_hash,
+								":id": id
+							}){
+								Ok(1) => Ok(0),
+								Ok(0) => Err(WFail::NoRecord),
+								_=> Err(WFail::DbError("Unable to execute reset_pass query".into())),
+							}
+						}
+					}
+					WriteAction::ChangePassword { id, phc_hash } => {
+						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = FALSE WHERE id = :id"){
+							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
+							Ok(mut change_pass) => match change_pass.execute(named_params!{
 								":phc_hash": phc_hash,
 								":id": id
 							}){
@@ -700,6 +712,10 @@ pub enum WriteAction {
 	DeleteUser(String),
 
 	ResetPassword {
+		id: String,
+		phc_hash: String,
+	},
+	ChangePassword {
 		id: String,
 		phc_hash: String,
 	},

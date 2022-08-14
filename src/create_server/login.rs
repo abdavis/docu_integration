@@ -43,10 +43,12 @@ const CONFIG: Config = Config {
 	hash_length: 32,
 };
 
+type Salt = [u8; 16];
+
 pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 	Router::new()
 		.route("auth/login", post(login_handler))
-		.route("auth/change_pswd", post(change_handler))
+		.route("auth/change_pswd", post(change_pass_handler))
 		.route_layer(Extension((wtx, rtx)))
 }
 
@@ -58,10 +60,10 @@ struct Login {
 #[derive(Deserialize)]
 struct ChangePassword {
 	user: String,
-	current_password: String,
+	new_password: String,
 	old_password: String,
 }
-async fn change_handler(
+async fn change_pass_handler(
 	Extension((wtx, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
 	Json(change): Json<ChangePassword>,
 ) -> Response {
@@ -72,11 +74,46 @@ async fn change_handler(
 			user_id: change.user,
 		},
 		tx,
-	)).unwrap_or_default();
+	))
+	.unwrap_or_default();
 	match rx.await {
-		Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-		Ok(RSuccess::User(Some(user)))) => {
-
+		Ok(Ok(RSuccess::User(Some(user)))) => {
+			match argon2::verify_encoded(&user.phc_hash, change.old_password.as_bytes()) {
+				Ok(true) => {
+					match argon2::hash_encoded(
+						change.new_password.as_bytes(),
+						&{
+							let salt = thread_rng().gen::<Salt>();
+							salt
+						},
+						&CONFIG,
+					) {
+						Ok(phc) => {
+							let (tx, rx) = oneshot::channel();
+							wtx.send((
+								db::WriteAction::ChangePassword {
+									id: user.id,
+									phc_hash: phc,
+								},
+								tx,
+							))
+							.unwrap_or_default();
+							match rx.await {
+								Ok(Ok(_)) => StatusCode::OK.into_response(),
+								_ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+							}
+						}
+						_ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+					}
+				}
+				_ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+			}
+		}
+		_ => {
+			argon2::hash_encoded("foobar".as_bytes(), "somesalt".as_bytes(), &CONFIG)
+				.unwrap_or_default();
+			sleep.await;
+			StatusCode::UNAUTHORIZED.into_response()
 		}
 	}
 }
@@ -141,10 +178,6 @@ async fn login_handler(
 			StatusCode::UNAUTHORIZED.into_response()
 		}
 	}
-}
-
-fn verify_password(pass: String, phc: String) -> Result<(), StatusCode> {
-	
 }
 
 #[derive(Debug, Serialize, Clone)]
