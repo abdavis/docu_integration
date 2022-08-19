@@ -4,6 +4,7 @@ use tokio::task;
 
 use crate::{db, websocket_handler, Config};
 
+mod admin;
 pub mod login;
 mod webhook;
 

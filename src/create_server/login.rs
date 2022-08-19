@@ -5,12 +5,12 @@ use axum::{
 	http::{header::SET_COOKIE, Request, StatusCode},
 	middleware::Next,
 	response::{IntoResponse, Response},
-	routing::{get, post, put},
+	routing::post,
 	Extension, Router, TypedHeader,
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use lazy_static::lazy_static;
-use rand::{distributions::Standard, rngs::adapter::ReseedingRng, thread_rng, Rng};
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
 	cmp::min,
@@ -31,7 +31,7 @@ lazy_static! {
 
 const COOKIE_NAME: &str = "session";
 const COOKIE_PARAMS: &str = "SameSite=Strict; Secure; path=/";
-const CONFIG: Config = Config {
+pub const CONFIG: Config = Config {
 	variant: Variant::Argon2id,
 	version: Version::Version13,
 	mem_cost: 65536,
@@ -43,9 +43,50 @@ const CONFIG: Config = Config {
 	hash_length: 32,
 };
 
-type Salt = [u8; 16];
+pub type Salt = [u8; 16];
+pub type TempPass = [u8; 12];
 
 pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
+	let (tx, rx) = oneshot::channel();
+	rtx.send((
+		db::ReadAction::GetUser {
+			user_id: "admin".into(),
+		},
+		tx,
+	))
+	.unwrap_or_default();
+
+	match rx.await {
+		Ok(Ok(RSuccess::User(maybe_user))) => {
+			if let None = maybe_user {
+				let temp_password = base64::encode(thread_rng().gen::<TempPass>());
+				match argon2::hash_encoded(
+					temp_password.as_bytes(),
+					&thread_rng().gen::<Salt>(),
+					&CONFIG,
+				) {
+					Ok(phc_hash) => {
+						let (tx, rx) = oneshot::channel();
+						println!("creating admin user with temp password: {phc_hash}");
+						wtx.send((
+							db::WriteAction::CreateUser(User {
+								id: "admin".into(),
+								phc_hash,
+								email: None,
+								reset_required: true,
+								admin: true,
+							}),
+							tx,
+						))
+						.unwrap_or_default()
+					}
+					_ => panic!(),
+				}
+			}
+		}
+		_ => panic!(),
+	}
+
 	Router::new()
 		.route("auth/login", post(login_handler))
 		.route("auth/change_pswd", post(change_pass_handler))
@@ -180,7 +221,7 @@ async fn login_handler(
 	}
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
 	pub id: String,
 	pub email: Option<String>,
