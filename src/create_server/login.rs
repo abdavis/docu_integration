@@ -1,6 +1,6 @@
 use argon2::{Config, ThreadMode, Variant, Version};
 use axum::{
-	extract::{Json, RequestParts},
+	extract::Json,
 	headers::Cookie,
 	http::{header::SET_COOKIE, Request, StatusCode},
 	middleware::Next,
@@ -238,35 +238,31 @@ struct Claims {
 	refresh: u64,
 }
 pub async fn verify_user_session<B: Send>(
+	TypedHeader(cookies): TypedHeader<Cookie>,
 	req: Request<B>,
 	next: Next<B>,
 ) -> Result<impl IntoResponse, Response> {
-	verify_session(false, req, next).await
+	verify_session(cookies, false, req, next).await
 }
 
 pub async fn verify_admin_session<B: Send>(
+	TypedHeader(cookies): TypedHeader<Cookie>,
 	req: Request<B>,
 	next: Next<B>,
 ) -> Result<impl IntoResponse, Response> {
-	verify_session(true, req, next).await
+	verify_session(cookies, true, req, next).await
 }
 
 async fn verify_session<B: Send>(
+	cookies: Cookie,
 	admin: bool,
 	req: Request<B>,
 	next: Next<B>,
 ) -> Result<impl IntoResponse, Response> {
-	let mut request_parts = RequestParts::new(req);
-	let cookies = request_parts
-		.extract::<TypedHeader<Cookie>>()
-		.await
-		.map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
-
 	match cookies.get("session") {
 		None => Err(StatusCode::UNAUTHORIZED.into_response()),
 		Some(cookie) => {
 			let (new_token, max_age) = verify_jwt(cookie, admin)?;
-			let request = request_parts.try_into_request().expect("body extracted");
 			Ok((
 				[(
 					SET_COOKIE,
@@ -275,7 +271,7 @@ async fn verify_session<B: Send>(
 						COOKIE_NAME, new_token, max_age, COOKIE_PARAMS
 					),
 				)],
-				next.run(request).await,
+				next.run(req).await,
 			))
 		}
 	}

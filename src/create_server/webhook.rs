@@ -31,12 +31,12 @@ pub fn create_routes(
 #[debug_handler]
 async fn webhook_handler(
 	headers: HeaderMap,
-	ContentLengthLimit(body): extract::ContentLengthLimit<Bytes, 4096>,
 	Extension((key, wtx, completed_tx)): Extension<(
 		Arc<hmac::Key>,
 		db::WriteTx,
 		async_channel::Sender<()>,
 	)>,
+	ContentLengthLimit(body): extract::ContentLengthLimit<Bytes, 4096>,
 ) -> StatusCode {
 	println!("webhook hit");
 	match verify_msg(&key, &headers, &body).await {
