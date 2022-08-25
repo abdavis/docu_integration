@@ -328,6 +328,8 @@ fn database_writer(
 			}
 		}
 	}
+	//sleep here so that the write connection closes after readers. Makes it so that the wal and shm files are cleaned up nicely.
+	thread::sleep(std::time::Duration::from_secs(1));
 }
 
 fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<ReadResult>)>) {
