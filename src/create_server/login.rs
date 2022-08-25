@@ -66,7 +66,7 @@ pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 					&CONFIG,
 				) {
 					Ok(phc_hash) => {
-						let (tx, rx) = oneshot::channel();
+						let (tx, _rx) = oneshot::channel();
 						println!("creating admin user with temp password: {phc_hash}");
 						wtx.send((
 							db::WriteAction::CreateUser(User {
@@ -88,8 +88,8 @@ pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 	}
 
 	Router::new()
-		.route("auth/login", post(login_handler))
-		.route("auth/change_pswd", post(change_pass_handler))
+		.route("/auth/login", post(login_handler))
+		.route("/auth/change_pswd", post(change_pass_handler))
 		.route_layer(Extension((wtx, rtx)))
 }
 

@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use rand::{thread_rng, Rng};
 
 use axum_macros::debug_handler;
-const hello: &str = "helloagain";
+
 use crate::{
 	create_server::login::{verify_admin_session, Salt, TempPass, User, CONFIG},
 	db,
@@ -18,11 +18,11 @@ use crate::{
 
 pub fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 	Router::new()
-		.route("/admin/users", post(create_user).get(get_users))
 		.route(
-			"/admin/users/:username",
-			delete(delete_user).put(update_user),
+			"/admin/users",
+			post(create_user).get(get_users).put(update_user),
 		)
+		.route("/admin/users/:username", delete(delete_user))
 		.route("/admin/users/:username/reset_password", post(reset_pass))
 		.layer(Extension((wtx, rtx)))
 		.route_layer(middleware::from_fn(verify_admin_session))
@@ -110,4 +110,16 @@ async fn reset_pass(
 		Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
 	}
 }
-async fn update_user(Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>) {}
+async fn update_user(
+	Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>,
+	Json(user): Json<User>,
+) -> StatusCode {
+	let (tx, rx) = oneshot::channel();
+	wtx.send((db::WriteAction::UpdateUser(user), tx))
+		.unwrap_or_default();
+	match rx.await {
+		Ok(Ok(_)) => StatusCode::OK,
+		Ok(Err(db::WFail::NoRecord)) => StatusCode::NOT_FOUND,
+		_ => StatusCode::INTERNAL_SERVER_ERROR,
+	}
+}

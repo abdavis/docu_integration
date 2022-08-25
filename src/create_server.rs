@@ -24,7 +24,9 @@ pub async fn run(
 	.await
 	.expect("Unable to load certificates");
 
-	let app = webhook::create_routes(&config, db_wtx.clone(), completed_processor_tx);
+	let app = webhook::create_routes(&config, db_wtx.clone(), completed_processor_tx)
+		.merge(login::create_routes(db_wtx.clone(), db_rtx.clone()).await)
+		.merge(admin::create_routes(db_wtx, db_rtx));
 
 	let handle = Handle::new();
 
