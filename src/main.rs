@@ -127,6 +127,15 @@ async fn main() {
 		shutdown_rx,
 	)));
 
+	match tokio::signal::ctrl_c().await {
+		Ok(()) => {}
+		Err(err) => {
+			println!("Unable to listen for shutdown signal: {err}");
+		}
+	}
+
+	shutdown_tx.send(());
+
 	for task in tasks {
 		task.await.unwrap_or_default();
 	}
