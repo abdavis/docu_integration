@@ -1,9 +1,9 @@
 use axum::{
 	body::Bytes,
-	extract::{self, ContentLengthLimit},
+	extract::{self, ContentLengthLimit, State},
 	http::{header::HeaderMap, StatusCode},
 	routing::post,
-	Extension, Router,
+	Router,
 };
 use axum_macros::debug_handler;
 use ring::{constant_time::verify_slices_are_equal, hmac};
@@ -17,21 +17,18 @@ pub fn create_routes(
 	config: &Config,
 	db_wtx: db::WriteTx,
 	completed_tx: async_channel::Sender<()>,
-) -> Router {
+) -> Router<(Arc<hmac::Key>, db::WriteTx, async_channel::Sender<()>)> {
 	let key = Arc::new(hmac::Key::new(
 		hmac::HMAC_SHA256,
 		config.docusign.hmac_key.as_bytes(),
 	));
 	let db_wtx = db_wtx.clone();
-	Router::new().route(
-		"/webhook",
-		post(webhook_handler).layer(Extension((key, db_wtx, completed_tx))),
-	)
+	Router::with_state((key, db_wtx, completed_tx)).route("/webhook", post(webhook_handler))
 }
 #[debug_handler]
 async fn webhook_handler(
 	headers: HeaderMap,
-	Extension((key, wtx, completed_tx)): Extension<(
+	State((key, wtx, completed_tx)): State<(
 		Arc<hmac::Key>,
 		db::WriteTx,
 		async_channel::Sender<()>,
@@ -53,12 +50,14 @@ async fn process_msg(
 	match serde_json::from_slice::<Msg>(&body) {
 		Err(_) => StatusCode::BAD_REQUEST,
 		Ok(msg) => {
-			let completed = msg.event == "envelope-completed";
+			let completed = msg.event == "envelope-completed" || msg.event == "envelope-voided";
 			let (tx, rx) = oneshot::channel();
 			wtx.send((msg.into_db_update(), tx)).unwrap_or_default();
 			match rx.await {
 				Ok(Ok(_)) => {
-					completed_tx.try_send(()).unwrap_or_default();
+					if completed {
+						completed_tx.try_send(()).unwrap_or_default();
+					}
 					StatusCode::OK
 				}
 				Ok(Err(db::WFail::NoRecord)) => StatusCode::NOT_FOUND,

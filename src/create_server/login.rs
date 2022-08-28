@@ -1,12 +1,12 @@
 use argon2::{Config, ThreadMode, Variant, Version};
 use axum::{
-	extract::Json,
+	extract::{Json, State},
 	headers::Cookie,
 	http::{header::SET_COOKIE, Request, StatusCode},
 	middleware::Next,
 	response::{IntoResponse, Response},
 	routing::post,
-	Extension, Router, TypedHeader,
+	Router, TypedHeader,
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use lazy_static::lazy_static;
@@ -46,7 +46,7 @@ pub const CONFIG: Config = Config {
 pub type Salt = [u8; 16];
 pub type TempPass = [u8; 12];
 
-pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
+pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router<(db::WriteTx, db::ReadTx)> {
 	let (tx, rx) = oneshot::channel();
 	rtx.send((
 		db::ReadAction::GetUser {
@@ -87,10 +87,9 @@ pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
 		_ => panic!(),
 	}
 
-	Router::new()
+	Router::with_state((wtx, rtx))
 		.route("/auth/login", post(login_handler))
 		.route("/auth/change_pswd", post(change_pass_handler))
-		.route_layer(Extension((wtx, rtx)))
 }
 
 #[derive(Deserialize)]
@@ -105,7 +104,7 @@ struct ChangePassword {
 	old_password: String,
 }
 async fn change_pass_handler(
-	Extension((wtx, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((wtx, rtx)): State<(db::WriteTx, db::ReadTx)>,
 	Json(change): Json<ChangePassword>,
 ) -> Response {
 	let sleep = sleep(Duration::from_secs(5));
@@ -160,7 +159,7 @@ async fn change_pass_handler(
 }
 
 async fn login_handler(
-	Extension((_, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((_, rtx)): State<(db::WriteTx, db::ReadTx)>,
 	Json(login): Json<Login>,
 ) -> Response {
 	let sleep = sleep(Duration::from_secs(5));

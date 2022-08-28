@@ -1,5 +1,5 @@
 use axum::{
-	extract::{Extension, Json, Path},
+	extract::{Json, Path, State},
 	http::StatusCode,
 	middleware,
 	routing::{delete, post},
@@ -16,20 +16,19 @@ use crate::{
 	db,
 };
 
-pub fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router {
-	Router::new()
+pub fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router<(db::WriteTx, db::ReadTx)> {
+	Router::with_state((wtx, rtx))
 		.route(
 			"/admin/users",
 			post(create_user).get(get_users).put(update_user),
 		)
 		.route("/admin/users/:username", delete(delete_user))
 		.route("/admin/users/:username/reset_password", post(reset_pass))
-		.layer(Extension((wtx, rtx)))
 		.route_layer(middleware::from_fn(verify_admin_session))
 }
 #[debug_handler]
 async fn create_user(
-	Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((wtx, _)): State<(db::WriteTx, db::ReadTx)>,
 	Json(mut user): Json<User>,
 ) -> Result<(StatusCode, String), StatusCode> {
 	let temp_pass = base64::encode(thread_rng().gen::<TempPass>());
@@ -56,7 +55,7 @@ async fn create_user(
 	}
 }
 async fn get_users(
-	Extension((_, rtx)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((_, rtx)): State<(db::WriteTx, db::ReadTx)>,
 ) -> Result<Json<Vec<User>>, StatusCode> {
 	let (tx, rx) = oneshot::channel();
 	rtx.send((db::ReadAction::GetUsers, tx)).unwrap_or_default();
@@ -66,7 +65,7 @@ async fn get_users(
 	}
 }
 async fn delete_user(
-	Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((wtx, _)): State<(db::WriteTx, db::ReadTx)>,
 	Path(username): Path<String>,
 ) -> StatusCode {
 	let (tx, rx) = oneshot::channel();
@@ -79,7 +78,7 @@ async fn delete_user(
 	}
 }
 async fn reset_pass(
-	Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((wtx, _)): State<(db::WriteTx, db::ReadTx)>,
 	Path(username): Path<String>,
 ) -> Result<String, StatusCode> {
 	let temp_pass = base64::encode(thread_rng().gen::<TempPass>());
@@ -111,7 +110,7 @@ async fn reset_pass(
 	}
 }
 async fn update_user(
-	Extension((wtx, _)): Extension<(db::WriteTx, db::ReadTx)>,
+	State((wtx, _)): State<(db::WriteTx, db::ReadTx)>,
 	Json(user): Json<User>,
 ) -> StatusCode {
 	let (tx, rx) = oneshot::channel();

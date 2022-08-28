@@ -1,7 +1,7 @@
 use async_channel;
 use serde::Deserialize;
 use std::fs;
-use tokio::{self, sync::oneshot, task};
+use tokio::{self, task};
 use toml;
 
 mod batch_processor;
@@ -135,7 +135,7 @@ async fn main() {
 		}
 	}
 
-	shutdown_tx.send(());
+	shutdown_tx.send(()).unwrap_or_default();
 
 	for task in tasks {
 		task.await.unwrap_or_default();
