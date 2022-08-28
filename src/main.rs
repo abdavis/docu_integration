@@ -23,79 +23,80 @@ async fn main() {
 	let token_auth = oauth::auth_initiate(&config);
 
 	let (wtx, rtx, db_update_tx, handles) = db::init();
-	let (tx, rx) = oneshot::channel();
-	wtx.send((
-		db::WriteAction::NewBatch(db::BatchData {
-			name: "Bob's Burgers 12".into(),
-			description: "A wonderful burger joint".into(),
-			records: vec![
-				db::CsvImport {
-					ssn: 1236789010,
-					first_name: "Bob".into(),
-					middle_name: None,
-					last_name: "Duncan".into(),
-					dob: "1988-05-25".into(),
-					addr1: "123 fake st".into(),
-					addr2: None,
-					city: "Ogden".into(),
-					state: "Utah".into(),
-					zip: "84414".into(),
-					email: "abdavis7@gmail.com".into(),
-					phone: "123-45-6789".into(),
-					spouse: None,
-				},
-				db::CsvImport {
-					ssn: 654321010,
-					first_name: "Bob".into(),
-					middle_name: None,
-					last_name: "Duncan".into(),
-					dob: "1988-05-25".into(),
-					addr1: "123 fake st".into(),
-					addr2: None,
-					city: "Ogden".into(),
-					state: "Utah".into(),
-					zip: "84414".into(),
-					email: "abdavis7@gmail.com".into(),
-					phone: "123-45-6789".into(),
-					spouse: None,
-				},
-				db::CsvImport {
-					ssn: 12345610,
-					first_name: "Bob".into(),
-					middle_name: None,
-					last_name: "Duncan".into(),
-					dob: "1988-05-25".into(),
-					addr1: "123 fake st".into(),
-					addr2: None,
-					city: "Ogden".into(),
-					state: "Utah".into(),
-					zip: "84414".into(),
-					email: "abdavis7@gmail.com".into(),
-					phone: "123-45-6789".into(),
-					spouse: None,
-				},
-				db::CsvImport {
-					ssn: 98765410,
-					first_name: "Bob".into(),
-					middle_name: None,
-					last_name: "Duncan".into(),
-					dob: "1988-05-25".into(),
-					addr1: "123 fake st".into(),
-					addr2: None,
-					city: "Ogden".into(),
-					state: "Utah".into(),
-					zip: "84414".into(),
-					email: "abdavis7@gmail.com".into(),
-					phone: "123-45-6789".into(),
-					spouse: None,
-				},
-			],
-		}),
-		tx,
-	))
-	.unwrap_or_default();
-	let db_result = rx.await;
-	println!("db write status: {db_result:?}");
+	//let (tx, rx) = oneshot::channel();
+	// wtx.send((
+	// 	db::WriteAction::NewBatch(db::NewBatchData {
+	// 		name: "Bob's Burgers 12".into(),
+	// 		description: "A wonderful burger joint".into(),
+	// 		records: vec![
+	// 			db::NewEnvelopes {
+	// 				ssn: 1236789010,
+	// 				first_name: "Bob".into(),
+	// 				middle_name: None,
+	// 				last_name: "Duncan".into(),
+	// 				dob: "1988-05-25".into(),
+	// 				addr1: "123 fake st".into(),
+	// 				addr2: None,
+	// 				city: "Ogden".into(),
+	// 				state: "Utah".into(),
+	// 				zip: "84414".into(),
+	// 				email: "abdavis7@gmail.com".into(),
+	// 				phone: "123-45-6789".into(),
+	// 				spouse: None,
+	// 			},
+	// 			db::NewEnvelopes {
+	// 				ssn: 654321010,
+	// 				first_name: "Bob".into(),
+	// 				middle_name: None,
+	// 				last_name: "Duncan".into(),
+	// 				dob: "1988-05-25".into(),
+	// 				addr1: "123 fake st".into(),
+	// 				addr2: None,
+	// 				city: "Ogden".into(),
+	// 				state: "Utah".into(),
+	// 				zip: "84414".into(),
+	// 				email: "abdavis7@gmail.com".into(),
+	// 				phone: "123-45-6789".into(),
+	// 				spouse: None,
+	// 			},
+	// 			db::NewEnvelopes {
+	// 				ssn: 12345610,
+	// 				first_name: "Bob".into(),
+	// 				middle_name: None,
+	// 				last_name: "Duncan".into(),
+	// 				dob: "1988-05-25".into(),
+	// 				addr1: "123 fake st".into(),
+	// 				addr2: None,
+	// 				city: "Ogden".into(),
+	// 				state: "Utah".into(),
+	// 				zip: "84414".into(),
+	// 				email: "abdavis7@gmail.com".into(),
+	// 				phone: "123-45-6789".into(),
+	// 				spouse: None,
+	// 			},
+	// 			db::NewEnvelopes {
+	// 				ssn: 98765410,
+	// 				first_name: "Bob".into(),
+	// 				middle_name: None,
+	// 				last_name: "Duncan".into(),
+	// 				dob: "1988-05-25".into(),
+	// 				addr1: "123 fake st".into(),
+	// 				addr2: None,
+	// 				city: "Ogden".into(),
+	// 				state: "Utah".into(),
+	// 				zip: "84414".into(),
+	// 				email: "abdavis7@gmail.com".into(),
+	// 				phone: "123-45-6789".into(),
+	// 				spouse: None,
+	// 			},
+	// 		],
+	// 	}),
+	// 	tx,
+	// ))
+	// .unwrap_or_default();
+	//let db_result = rx.await;
+	//println!("db write status: {db_result:?}");
+
 	let client = reqwest::Client::new();
 
 	let mut tasks = vec![];

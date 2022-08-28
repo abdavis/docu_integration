@@ -680,7 +680,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 }
 
 pub enum WriteAction {
-	NewBatch(BatchData),
+	NewBatch(NewBatchData),
 
 	UpdateAcct(Acct),
 
@@ -869,13 +869,13 @@ impl Key for EnvelopeDetail {
 	}
 }
 #[derive(Deserialize)]
-pub struct BatchData {
+pub struct NewBatchData {
 	pub name: String,
 	pub description: String,
-	pub records: Vec<CsvImport>,
+	pub records: Vec<NewEnvelopes>,
 }
 #[derive(Clone, Deserialize)]
-pub struct CsvImport {
+pub struct NewEnvelopes {
 	pub ssn: u32,
 	pub first_name: String,
 	pub middle_name: Option<String>,
