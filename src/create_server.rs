@@ -2,12 +2,13 @@ use axum_server::{tls_rustls::RustlsConfig, Handle};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use tokio::task;
 
-use crate::{db, websocket_handler, Config};
+use crate::{db, Config};
 
 mod admin;
 mod api;
 pub mod login;
 mod webhook;
+pub mod websocket_handler;
 
 pub async fn run(
 	config: Config,

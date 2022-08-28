@@ -1,12 +1,17 @@
 use crate::db;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+	extract::State, http::StatusCode, middleware::from_fn, response::IntoResponse, routing::post,
+	Json, Router,
+};
 use tokio::sync::oneshot;
 
 pub fn create_routes(
 	wtx: db::WriteTx,
 	batch_tx: async_channel::Sender<()>,
 ) -> Router<(db::WriteTx, async_channel::Sender<()>)> {
-	Router::with_state((wtx, batch_tx)).route("/batches", post(new_batch))
+	Router::with_state((wtx, batch_tx))
+		.route("/batches", post(new_batch))
+		.route_layer(from_fn(super::login::verify_user_session))
 }
 
 async fn new_batch(

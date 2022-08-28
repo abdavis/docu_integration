@@ -10,7 +10,6 @@ mod db;
 //mod login_handler;
 mod oauth;
 //mod server;
-mod websocket_handler;
 
 const DB_SCHEMA: &'static str = include_str!("schema.sql");
 
@@ -110,11 +109,9 @@ async fn main() {
 	);
 	tasks.push(proc_handle);
 	let (ws_handler_tx, ws_handler_rx) = async_channel::bounded(1000);
-	tasks.push(task::spawn(websocket_handler::connector_task(
-		ws_handler_rx,
-		rtx.clone(),
-		db_update_tx,
-	)));
+	tasks.push(task::spawn(
+		create_server::websocket_handler::connector_task(ws_handler_rx, rtx.clone(), db_update_tx),
+	));
 	processor_tx.send(()).await.unwrap_or_default();
 	let (completed_tx, completed_rx) = async_channel::bounded(1);
 	let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
