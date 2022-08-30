@@ -19,11 +19,14 @@ use crate::{
 pub fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router<(db::WriteTx, db::ReadTx)> {
 	Router::with_state((wtx, rtx))
 		.route(
-			"/admin/users",
+			"/api/admin/users",
 			post(create_user).get(get_users).put(update_user),
 		)
-		.route("/admin/users/:username", delete(delete_user))
-		.route("/admin/users/:username/reset_password", post(reset_pass))
+		.route("/api/admin/users/:username", delete(delete_user))
+		.route(
+			"/api/admin/users/:username/reset_password",
+			post(reset_pass),
+		)
 		.route_layer(middleware::from_fn(verify_admin_session))
 }
 #[debug_handler]

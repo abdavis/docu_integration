@@ -126,8 +126,8 @@ async fn updater_task(
 		let weak_disconnect = Arc::downgrade(&disconnect_handle);
 		let read_query = match resource {
 			Resource::Main => ReadAction::ActiveBatches,
-			Resource::Batch(num) => ReadAction::BatchDetail { rowid: num },
-			Resource::Individual(num) => ReadAction::EnvelopeDetail { ssn: num },
+			Resource::Batch(num) => ReadAction::Batch { rowid: num },
+			Resource::Individual(num) => ReadAction::Person { ssn: num },
 		};
 		let (temp_tx, temp_rx) = oneshot::channel();
 		if let Ok(_) = db_reader_channel.try_send((read_query.clone(), temp_tx)) {

@@ -28,8 +28,12 @@ pub async fn run(
 
 	let app = webhook::create_routes(&config, db_wtx.clone(), completed_processor_tx)
 		.merge(login::create_routes(db_wtx.clone(), db_rtx.clone()).await)
-		.merge(admin::create_routes(db_wtx.clone(), db_rtx))
-		.merge(api::create_routes(db_wtx, batch_processor_tx));
+		.merge(admin::create_routes(db_wtx.clone(), db_rtx.clone()))
+		.merge(api::create_routes(
+			db_wtx,
+			batch_processor_tx,
+			ws_handler_tx,
+		));
 
 	let handle = Handle::new();
 

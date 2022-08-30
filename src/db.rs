@@ -410,7 +410,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					}
 				}
 			},
-			ReadAction::BatchDetail{rowid } => {
+			ReadAction::Batch{rowid } => {
 				match conn.prepare_cached("
 					SELECT ssn_batch_relat.ssn, primary_account, created_account, fname, mname, lname, info_codes, host_api_err, docusign_api_err, status, void_reason, ignore_error
 					FROM ssn_batch_relat
@@ -450,7 +450,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 					}
 				}
 			},
-			ReadAction::EnvelopeDetail{ssn} => {
+			ReadAction::Person{ssn} => {
 				match conn.transaction() {
 					Err(_) => ReadResult::Err("Unable to begin transaction for envelope details".into()),
 					Ok(tran) => match (
@@ -785,9 +785,9 @@ pub enum WFail {
 pub enum ReadAction {
 	ActiveBatches,
 	//rowid for batch detail
-	BatchDetail { rowid: i64 },
+	Batch { rowid: i64 },
 	//ssn for individual detail
-	EnvelopeDetail { ssn: u32 },
+	Person { ssn: u32 },
 	FetchPdf { gid: String },
 	NewEnvelopes,
 	GetUser { user_id: String },
