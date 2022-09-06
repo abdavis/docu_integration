@@ -24,6 +24,17 @@ pub fn init_batch_processor(
 	});
 	(tx, handle)
 }
+
+async fn completed_batch_processor(
+	http_client: Client,
+	config: Config,
+	mut token: AuthHelper,
+	rx: async_channel::Receiver<()>,
+	db_wtx: db::WriteTx,
+	db_rtx: db::ReadTx,
+) {
+}
+
 async fn new_batch_processor(
 	http_client: Client,
 	config: Config,
