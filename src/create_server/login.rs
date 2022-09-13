@@ -67,7 +67,7 @@ pub async fn create_routes(wtx: db::WriteTx, rtx: db::ReadTx) -> Router<(db::Wri
 				) {
 					Ok(phc_hash) => {
 						let (tx, _rx) = oneshot::channel();
-						println!("creating admin user with temp password: {phc_hash}");
+						println!("creating admin user with temp password: {temp_password}");
 						wtx.send((
 							db::WriteAction::CreateUser(User {
 								id: "admin".into(),

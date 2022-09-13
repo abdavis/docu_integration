@@ -100,27 +100,27 @@ async fn main() {
 
 	let mut tasks = vec![];
 
-	let (processor_tx, proc_handle) = batch_processor::init_batch_processor(
-		&client,
-		&config,
-		token_auth,
-		wtx.clone(),
-		rtx.clone(),
-	);
-	tasks.push(proc_handle);
+	let (new_batch_tx, new_batch_handle, completed_tx, completed_handle) =
+		batch_processor::init_batch_processor(
+			&client,
+			&config,
+			token_auth,
+			wtx.clone(),
+			rtx.clone(),
+		);
+	tasks.push(new_batch_handle);
 	let (ws_handler_tx, ws_handler_rx) = async_channel::bounded(1000);
 	tasks.push(task::spawn(
 		create_server::websocket_handler::connector_task(ws_handler_rx, rtx.clone(), db_update_tx),
 	));
-	processor_tx.send(()).await.unwrap_or_default();
-	let (completed_tx, completed_rx) = async_channel::bounded(1);
+	completed_tx.send(()).await.unwrap_or_default();
 	let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
 	tasks.push(task::spawn(create_server::run(
 		config,
 		wtx,
 		rtx,
 		ws_handler_tx,
-		processor_tx,
+		new_batch_tx,
 		completed_tx,
 		shutdown_rx,
 	)));

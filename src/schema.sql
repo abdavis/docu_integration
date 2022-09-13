@@ -48,8 +48,7 @@ create table envelopes(
     spouse_lname text,
     spouse_email text,
     date_created integer not null default(strftime('%s', 'now')),
-    --boolean: 0/1
-    is_married integer --make sure spouse info is all blank or filled in properly
+    --make sure spouse info is all blank or filled in properly
     CHECK(
         (
             spouse_fname IS NULL
@@ -68,6 +67,10 @@ create unique index envelope_ssn on envelopes(ssn, date_created);
 create unique index envelopes_restrict_active on envelopes(ssn)
 where status is null
     or status not in ('completed', 'declined', 'voided', 'cancelled');
+--index for completed but un processed docusign forms
+create index envelope_status on envelopes(status, gid)
+where (status = 'voided' and void_reason is null)
+    or (status = 'completed' and created_account is null and (docusign_api_err is not null or host_api_err is not null));
 CREATE TABLE beneficiaries(
     gid text not null references envelopes(gid) on delete cascade,
     --primary/contingent

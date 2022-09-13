@@ -675,6 +675,31 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 				}
 			}
 
+			ReadAction::UnprocessedEnvelopes => {
+				match conn.prepare_cached("SELECT gid, status FROM envelopes WHERE (status = 'voided' AND void_reason IS NULL) OR (status = 'completed' AND created_account IS NULL AND (docusign_api_err IS NOT NULL OR host_api_err IS NOT NULL));") {
+					Err(_) => Err("Unable to prepare unprocessed query".into()),
+					Ok(mut unprocessed_stmt) => match unprocessed_stmt.query([]){
+						Err(_) => Err("Unable to query unprocessed_stmt".into()),
+						Ok(mut rows) => {
+							let mut unprocessed = vec![];
+							match loop{
+								match rows.next(){
+									Err(_) => break Err("Error during get users read loop".into()),
+									Ok(None) => break Ok(()),
+									Ok(Some(row)) => match (row.get(0), row.get(1)){
+										(Ok(gid), Ok(status)) => unprocessed.push(UnprocessedRow{gid, status}),
+										_=> break Err("type conversion error while getting unprocessed envelopes".into()),
+									}
+								}
+							}{
+								Ok(()) => Ok(RSuccess::UnprocessedEnvelopes(unprocessed)),
+								Err(string) => Err(string)
+							}
+						}
+					}
+				}
+			}
+
 		});
 	}
 }
@@ -754,15 +779,11 @@ impl rusqlite::types::FromSql for BeneficiaryType {
 	fn column_result(
 		value: rusqlite::types::ValueRef<'_>,
 	) -> std::result::Result<Self, rusqlite::types::FromSqlError> {
-		let val = value.as_str()?;
-		//set type to contingent if specified, otherwise assume primary
-		if val == "contingent" {
-			return Ok(Self::Contingent);
+		match value.as_str()? {
+			"contingent" => Ok(Self::Contingent),
+			"primary" => Ok(Self::Primary),
+			_ => Err(rusqlite::types::FromSqlError::InvalidType),
 		}
-		if val == "primary" {
-			return Ok(Self::Primary);
-		}
-		Err(rusqlite::types::FromSqlError::InvalidType)
 	}
 }
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -792,6 +813,7 @@ pub enum ReadAction {
 	NewEnvelopes,
 	GetUser { user_id: String },
 	GetUsers,
+	UnprocessedEnvelopes,
 }
 
 pub type ReadResult = Result<RSuccess, String>;
@@ -805,6 +827,29 @@ pub enum RSuccess {
 	PdfBlob(Vec<u8>),
 	User(Option<crate::create_server::login::User>),
 	Users(Vec<crate::create_server::login::User>),
+	UnprocessedEnvelopes(Vec<UnprocessedRow>),
+}
+#[derive(Serialize, Debug)]
+pub struct UnprocessedRow {
+	pub gid: String,
+	pub status: UnprocessedStatus,
+}
+#[derive(Serialize, Debug)]
+pub enum UnprocessedStatus {
+	Voided,
+	Completed,
+}
+
+impl rusqlite::types::FromSql for UnprocessedStatus {
+	fn column_result(
+		value: rusqlite::types::ValueRef<'_>,
+	) -> Result<Self, rusqlite::types::FromSqlError> {
+		match value.as_str()? {
+			"voided" => Ok(Self::Voided),
+			"completed" => Ok(Self::Completed),
+			_ => Err(rusqlite::types::FromSqlError::InvalidType),
+		}
+	}
 }
 
 pub trait Key {

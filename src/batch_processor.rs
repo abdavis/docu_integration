@@ -18,14 +18,30 @@ pub fn init_batch_processor(
 	token: AuthHelper,
 	db_wtx: db::WriteTx,
 	db_rtx: db::ReadTx,
-) -> (async_channel::Sender<()>, task::JoinHandle<()>) {
+) -> (
+	async_channel::Sender<()>,
+	task::JoinHandle<()>,
+	async_channel::Sender<()>,
+	task::JoinHandle<()>,
+) {
 	let http_client = http_client.clone();
 	let config = config.clone();
-	let (tx, rx) = async_channel::bounded(10);
-	let handle = task::spawn(async move {
-		new_batch_processor(http_client, config, token, rx, db_wtx, db_rtx).await
+	let (new_tx, new_rx) = async_channel::bounded(1);
+	let new_handle = task::spawn({
+		let http_client = http_client.clone();
+		let config = config.clone();
+		let db_wtx = db_wtx.clone();
+		let db_rtx = db_rtx.clone();
+		let token = token.clone();
+		async move {
+			new_batch_processor(http_client.clone(), config, token, new_rx, db_wtx, db_rtx).await
+		}
 	});
-	(tx, handle)
+	let (completed_tx, completed_rx) = async_channel::bounded(1);
+	let completed_handle = task::spawn(async move {
+		completed_batch_processor(http_client, config, token, completed_rx, db_wtx, db_rtx).await
+	});
+	(new_tx, new_handle, completed_tx, completed_handle)
 }
 
 async fn completed_batch_processor(
@@ -36,6 +52,19 @@ async fn completed_batch_processor(
 	db_wtx: db::WriteTx,
 	db_rtx: db::ReadTx,
 ) {
+	while let Ok(_) = rx.recv().await {
+		let (otx, orx) = oneshot::channel();
+		match db_rtx.send((db::ReadAction::UnprocessedEnvelopes, otx)) {
+			Err(_) => panic!("db connection broken"),
+			Ok(_) => match orx.await {
+				Ok(db::ReadResult::Ok(db::RSuccess::UnprocessedEnvelopes(completed_envelopes))) => {
+					stream::iter(completed_envelopes).map(|comp_env| todo!());
+					todo!()
+				}
+				_ => println!("Unable to get completed batch from db"),
+			},
+		}
+	}
 }
 
 async fn new_batch_processor(
@@ -50,11 +79,10 @@ async fn new_batch_processor(
 	while let Ok(_) = rx.recv().await {
 		let (otx, orx) = oneshot::channel();
 
-		match db_rtx.try_send((db::ReadAction::NewEnvelopes, otx)) {
-			Err(_) => (),
+		match db_rtx.send((db::ReadAction::NewEnvelopes, otx)) {
+			Err(_) => panic!("db connection broken"),
 			Ok(_) => match orx.await {
 				Ok(db::ReadResult::Ok(db::RSuccess::EnvelopeDetails(envelopes))) => {
-					token.get().await;
 					stream::iter(envelopes)
 						.map(|envelope| {
 							println! {"Envelope Api Called"}
