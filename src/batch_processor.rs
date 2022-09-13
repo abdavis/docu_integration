@@ -2,11 +2,14 @@ use crate::db;
 use crate::oauth::AuthHelper;
 use crate::Config;
 use async_channel;
+use async_recursion::async_recursion;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
 use tokio::task;
+use tokio::time::{sleep_until, Duration, Instant};
 
 const CONCURRENCY_BUFFER: usize = 10;
 pub fn init_batch_processor(
@@ -72,6 +75,7 @@ async fn new_batch_processor(
 		}
 	}
 
+	#[async_recursion]
 	async fn send_envelope(
 		client: Client,
 		config: &Config,
@@ -143,10 +147,35 @@ async fn new_batch_processor(
 				},
 				400..=499 => {
 					println!("{resp:?}");
+					let await_time = {
+						match resp.headers().get("X-RateLimit-Reset") {
+							Some(time) => match time.to_str() {
+								Ok(time) => match time.parse::<u64>() {
+									Ok(time) => Some(
+										Instant::now()
+											+ Duration::from_secs(
+												time - SystemTime::now()
+													.duration_since(UNIX_EPOCH)
+													.expect("System Clock Error")
+													.as_secs(),
+											),
+									),
+									Err(_) => None,
+								},
+								Err(_) => None,
+							},
+							None => None,
+						}
+					};
 					match resp.json::<ErrorDetails>().await {
 						Ok(error_detail) => {
 							println!("{error_detail:?}");
-							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {}
+							if error_detail.error_code == "HOURLY_APIINVOCATION_LIMIT_EXCEEDED" {
+								if let Some(time) = await_time {
+									sleep_until(time).await;
+									send_envelope(client, config, token, db_writer, envelope).await;
+								}
+							}
 						}
 						Err(_) => println!("unable to parse error msg"),
 					}
