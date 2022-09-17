@@ -102,7 +102,7 @@ pub struct AuthHelper {
 }
 
 impl AuthHelper {
-	pub async fn get(&mut self) -> String {
+	pub async fn get(&mut self) -> &str {
 		if self.expire <= Instant::now() {
 			let (oneshottx, oneshotrx) = oneshot::channel();
 			self.tx.send(oneshottx).await.unwrap_or_default();
@@ -110,6 +110,6 @@ impl AuthHelper {
 			self.token = new_token.0;
 			self.expire = new_token.1;
 		}
-		self.token.clone()
+		&self.token
 	}
 }

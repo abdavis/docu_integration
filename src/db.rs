@@ -687,7 +687,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 									Err(_) => break Err("Error during get users read loop".into()),
 									Ok(None) => break Ok(()),
 									Ok(Some(row)) => match (row.get(0), row.get(1)){
-										(Ok(gid), Ok(status)) => unprocessed.push(UnprocessedRow{gid, status}),
+										(Ok(gid), Ok(status)) => unprocessed.push(UnprocessedEnvelope{gid, status}),
 										_=> break Err("type conversion error while getting unprocessed envelopes".into()),
 									}
 								}
@@ -827,10 +827,10 @@ pub enum RSuccess {
 	PdfBlob(Vec<u8>),
 	User(Option<crate::create_server::login::User>),
 	Users(Vec<crate::create_server::login::User>),
-	UnprocessedEnvelopes(Vec<UnprocessedRow>),
+	UnprocessedEnvelopes(Vec<UnprocessedEnvelope>),
 }
 #[derive(Serialize, Debug)]
-pub struct UnprocessedRow {
+pub struct UnprocessedEnvelope {
 	pub gid: String,
 	pub status: UnprocessedStatus,
 }

@@ -39,12 +39,12 @@ pub fn init_batch_processor(
 	});
 	let (completed_tx, completed_rx) = async_channel::bounded(1);
 	let completed_handle = task::spawn(async move {
-		completed_batch_processor(http_client, config, token, completed_rx, db_wtx, db_rtx).await
+		completed_envelope_processor(http_client, config, token, completed_rx, db_wtx, db_rtx).await
 	});
 	(new_tx, new_handle, completed_tx, completed_handle)
 }
 
-async fn completed_batch_processor(
+async fn completed_envelope_processor(
 	http_client: Client,
 	config: Config,
 	mut token: AuthHelper,
@@ -54,15 +54,74 @@ async fn completed_batch_processor(
 ) {
 	while let Ok(_) = rx.recv().await {
 		let (otx, orx) = oneshot::channel();
+		token.get().await;
 		match db_rtx.send((db::ReadAction::UnprocessedEnvelopes, otx)) {
 			Err(_) => panic!("db connection broken"),
 			Ok(_) => match orx.await {
 				Ok(db::ReadResult::Ok(db::RSuccess::UnprocessedEnvelopes(completed_envelopes))) => {
-					stream::iter(completed_envelopes).map(|comp_env| todo!());
-					todo!()
+					stream::iter(completed_envelopes)
+						.map(|comp_env| {
+							let token = token.clone();
+							let http_client = http_client.clone();
+							let config = config.clone();
+							let db_wtx = db_wtx.clone();
+							async move {
+								complete_envelope(http_client, &config, token, db_wtx, comp_env)
+									.await
+							}
+						})
+						.buffer_unordered(CONCURRENCY_BUFFER)
+						.collect::<()>()
+						.await;
 				}
 				_ => println!("Unable to get completed batch from db"),
 			},
+		}
+	}
+
+	async fn complete_envelope(
+		client: Client,
+		config: &Config,
+		mut token: AuthHelper,
+		db_writer: db::WriteTx,
+		db::UnprocessedEnvelope { gid, status }: db::UnprocessedEnvelope,
+	) {
+		match status {
+			db::UnprocessedStatus::Voided => {
+				let request = client
+					.get(
+						"https://".to_owned()
+							+ &config.docusign.base_uri + "/restapi/v2.1/accounts/"
+							+ &config.docusign.user_account_id
+							+ "/envelopes/" + &gid,
+					)
+					.bearer_auth(token.get().await)
+					.send()
+					.await;
+
+				let void_reason = match request {
+					Ok(resp) => match resp.json::<serde_json::Value>().await {
+						Ok(val) => match &val["voidedReason"] {
+							serde_json::Value::String(s) => s.to_owned(),
+							_ => "UNKNOWN_VOID_REASON".into(),
+						},
+						Err(_) => "UNKNOWN_VOID_REASON".into(),
+					},
+					Err(_) => "UNKNOWN_VOID_REASON".into(),
+				};
+				db_writer
+					.send((
+						db::WriteAction::UpdateStatus {
+							gid,
+							status: "voided".into(),
+							api_err: None,
+							void_reason: Some(void_reason.into()),
+						},
+						otx,
+					))
+					.unwrap_or_default();
+			}
+			db::UnprocessedStatus::Completed => todo!(),
 		}
 	}
 }
@@ -78,7 +137,7 @@ async fn new_batch_processor(
 	println!("Batch Processer started");
 	while let Ok(_) = rx.recv().await {
 		let (otx, orx) = oneshot::channel();
-
+		token.get().await;
 		match db_rtx.send((db::ReadAction::NewEnvelopes, otx)) {
 			Err(_) => panic!("db connection broken"),
 			Ok(_) => match orx.await {
@@ -108,7 +167,7 @@ async fn new_batch_processor(
 		client: Client,
 		config: &Config,
 		mut token: AuthHelper,
-		db_writer: crossbeam_channel::Sender<(db::WriteAction, oneshot::Sender<db::WriteResult>)>,
+		db_writer: db::WriteTx,
 		envelope: db::EnvelopeDetail,
 	) {
 		let request = client
