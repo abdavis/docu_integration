@@ -6,3 +6,6 @@ config.toml
 *.odt
 *.pdf
 *.pem*
+
+/web/target
+/web/dist
