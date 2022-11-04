@@ -88,6 +88,7 @@ async fn completed_envelope_processor(
 	) {
 		match status {
 			db::UnprocessedStatus::Voided => {
+				let (otx, orx) = oneshot::channel();
 				let request = client
 					.get(
 						"https://".to_owned()
@@ -121,7 +122,21 @@ async fn completed_envelope_processor(
 					))
 					.unwrap_or_default();
 			}
-			db::UnprocessedStatus::Completed => todo!(),
+			db::UnprocessedStatus::Completed => {
+				//get completed envelope data here
+
+				//let (otx, orx) = oneshot::channel();
+				// let request = client
+				// 	.get(
+				// 		"https://".to_owned()
+				// 			+ &config.docusign.base_uri + "/restapi/v2.1/accounts/"
+				// 			+ &config.docusign.user_account_id
+				// 			+ "/envelopes/" + &gid,
+				// 	)
+				// 	.bearer_auth(token.get().await)
+				// 	.send()
+				// 	.await;
+			}
 		}
 	}
 }
