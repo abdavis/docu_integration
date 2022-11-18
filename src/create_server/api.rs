@@ -35,7 +35,7 @@ pub fn create_routes(
 			"/wss/people/:person_id",
 			get(connect_ws_person).with_state(ws_handler_tx),
 		)
-		.route_layer(from_fn(super::login::verify_user_session))
+	//.route_layer(from_fn(super::login::verify_user_session))
 }
 
 async fn connect_ws(

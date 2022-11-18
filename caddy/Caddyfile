@@ -1,3 +1,10 @@
 demo.mungler.xyz {
-    respond "hello, world!"
+    reverse_proxy /api/* localhost:8081
+    file_server {
+        root ../web/dist/
+    }
+}
+
+login.mungler.xyz {
+    reverse_proxy localhost:8080
 }

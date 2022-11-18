@@ -96,10 +96,3 @@ create table pdf(
     gid text primary key not null references envelopes(gid) on delete cascade,
     complete_pdf blob
 ) strict;
-CREATE TABLE users(
-    id TEXT PRIMARY KEY NOT NULL,
-    email TEXT,
-    phc_passwd TEXT NOT NULL,
-    reset_required INTEGER NOT NULL,
-    admin INTEGER NOT NULL
-) STRICT;
