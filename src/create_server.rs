@@ -4,9 +4,9 @@ use tokio::{sync::oneshot, task};
 
 use crate::{db, Config};
 
-mod admin;
+//mod admin;
 mod api;
-pub mod login;
+//pub mod login;
 mod webhook;
 pub mod websocket_handler;
 
@@ -20,8 +20,8 @@ pub async fn run(
 	shutdown_signal: tokio::sync::broadcast::Receiver<()>,
 ) {
 	let app = webhook::create_routes(&config, db_wtx.clone(), completed_processor_tx)
-		.merge(login::create_routes(db_wtx.clone(), db_rtx.clone()).await)
-		.merge(admin::create_routes(db_wtx.clone(), db_rtx.clone()))
+		//.merge(login::create_routes(db_wtx.clone(), db_rtx.clone()).await)
+		//.merge(admin::create_routes(db_wtx.clone(), db_rtx.clone()))
 		.merge(api::create_routes(
 			db_wtx,
 			batch_processor_tx,

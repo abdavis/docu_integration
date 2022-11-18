@@ -243,80 +243,7 @@ fn database_writer(
 
 						}
 					}
-					WriteAction::CreateUser(user) => {
-						match tran.prepare_cached("INSERT INTO users (id, email, phc_passwd, reset_required, admin) VALUES (:id, :email, :phc_hash, TRUE, :admin)"){
-							Ok(mut user_insert) => match user_insert.execute(named_params!{
-								":id": user.id,
-								":email": user.email,
-								":phc_hash": user.phc_hash,
-								":admin": user.admin
-							}){
-								Ok(_) => Ok(0),
-								Err(rusqlite::Error::SqliteFailure(SqliteError{code: _, extended_code: code}, _)) => {
-									if code == 1555 || code == 2067{
-										Err(WFail::Duplicate)
-									} else {
-										Err(WFail::DbError("Unable to insert into users table".into()))
-									}
-								}
-								_=> Err(WFail::DbError("Unable to insert into users table".into()))
-
-							},
-							Err(_) => Err(WFail::DbError("Unable to prepare user insert query".into()))
-						}
-					}
-					WriteAction::UpdateUser(user) => {
-						match tran.prepare_cached("UPDATE users SET email = :email, reset_required = :reset_required, admin = :admin
-							WHERE id = :id"){
-								Ok(mut user_update) => match user_update.execute(named_params!{
-									":id": user.id,
-									":email": user.email,
-									":reset_required": user.reset_required,
-									":admin": user.admin
-								}){
-									Ok(1) => Ok(0),
-									Ok(0) => Err(WFail::NoRecord),
-									_=> Err(WFail::DbError("Unable to update user".into()))
-								},
-								Err(_) => Err(WFail::DbError("Unable to prepare user update stmt".into()))
-							}
-					}
-					WriteAction::DeleteUser(username) => {
-						match tran.prepare_cached("DELETE FROM users WHERE id = :id"){
-							Ok(mut delete_user) => match delete_user.execute(named_params!{":id": username}){
-								Ok(1) => Ok(0),
-								Ok(0) => Err(WFail::NoRecord),
-								_ => Err(WFail::DbError("Unable to delete user".into())),
-							}
-							Err(_) => Err(WFail::DbError("Unable to prepare delete user stmt".into()))
-						}
-					}
-					WriteAction::ResetPassword{id,phc_hash} => {
-						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = TRUE WHERE id = :id"){
-							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
-							Ok(mut reset_pass) => match reset_pass.execute(named_params!{
-								":phc_hash": phc_hash,
-								":id": id
-							}){
-								Ok(1) => Ok(0),
-								Ok(0) => Err(WFail::NoRecord),
-								_=> Err(WFail::DbError("Unable to execute reset_pass query".into())),
-							}
-						}
-					}
-					WriteAction::ChangePassword { id, phc_hash } => {
-						match tran.prepare_cached("UPDATE users SET phc_passwd = :phc_hash, reset_required = FALSE WHERE id = :id"){
-							Err(_) => Err(WFail::DbError("Unable to prepare reset passwd query".into())),
-							Ok(mut change_pass) => match change_pass.execute(named_params!{
-								":phc_hash": phc_hash,
-								":id": id
-							}){
-								Ok(1) => Ok(0),
-								Ok(0) => Err(WFail::NoRecord),
-								_=> Err(WFail::DbError("Unable to execute reset_pass query".into())),
-							}
-						}
-					}
+					
 				} {
 					Ok(_) => match tran.commit() {
 						Ok(_) => {tx.send(WriteResult::Ok(dups)).unwrap_or_default(); update_tx.send(()).unwrap_or_default();},
@@ -630,50 +557,7 @@ fn database_reader(rx: crossbeam_channel::Receiver<(ReadAction, oneshot::Sender<
 				}
 			}
 
-			ReadAction::GetUser { user_id } => {
-				match conn.prepare_cached("SELECT email, phc_passwd, reset_required, admin FROM users WHERE id = :id"){
-					Err(_) => Err("Unable to prepare get user stmt".into()),
-					Ok(mut get_usr_stmt) => match get_usr_stmt.query(named_params!{":id": user_id}){
-						Err(_) => Err("Unable to query get user stmt".into()),
-						Ok(mut rows) => match rows.next() {
-							Err(_) => Err("Unable to get user".into()),
-							Ok(None) => Ok(RSuccess::User(None)),
-							Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3)){
-								(Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) => {
-									Ok(RSuccess::User(Some(crate::create_server::login::User {id: user_id, email, phc_hash, reset_required, admin})))
-								}
-								_ => Err("type conversion error while getting user".into())
-							}
-						}
-					}
-				}
-			}
-
-			ReadAction::GetUsers => {
-				match conn.prepare_cached("SELECT id, email, phc_passwd, reset_required, admin FROM users"){
-					Err(_) => Err("Unable to prepare get users stmt".into()),
-					Ok(mut get_users_stmt) => match get_users_stmt.query([]){
-						Err(_) => Err("Unable to query get user stmt".into()),
-						Ok(mut rows) => {
-							let mut users = vec![];
-							match loop{
-								match rows.next(){
-									Err(_) => break Err("Error during get users read loop".into()),
-									Ok(None) => break Ok(()),
-									Ok(Some(row)) => match (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4)){
-										(Ok(id), Ok(email), Ok(phc_hash), Ok(reset_required), Ok(admin)) =>
-											users.push(crate::create_server::login::User{id, email, phc_hash, reset_required, admin}),
-										_=> break Err("type conversion error while getting users in loop".into()),
-									}
-								}
-							}{
-								Ok(()) => Ok(RSuccess::Users(users)),
-								Err(string) => Err(string)
-							}
-						}
-					}
-				}
-			}
+			
 
 			ReadAction::UnprocessedEnvelopes => {
 				match conn.prepare_cached("SELECT gid, status FROM envelopes WHERE (status = 'voided' AND void_reason IS NULL) OR (status = 'completed' AND created_account IS NULL AND (docusign_api_err IS NOT NULL OR host_api_err IS NOT NULL));") {
@@ -730,21 +614,6 @@ pub enum WriteAction {
 		beneficiaries: Vec<Beneficiary>,
 		authorized_users: Vec<AuthorizedUser>,
 		pdf: Vec<u8>,
-	},
-
-	CreateUser(crate::create_server::login::User),
-
-	UpdateUser(crate::create_server::login::User),
-
-	DeleteUser(String),
-
-	ResetPassword {
-		id: String,
-		phc_hash: String,
-	},
-	ChangePassword {
-		id: String,
-		phc_hash: String,
 	},
 }
 
@@ -811,8 +680,6 @@ pub enum ReadAction {
 	Person { ssn: u32 },
 	FetchPdf { gid: String },
 	NewEnvelopes,
-	GetUser { user_id: String },
-	GetUsers,
 	UnprocessedEnvelopes,
 }
 
@@ -825,8 +692,6 @@ pub enum RSuccess {
 	EnvelopeDetails(Vec<EnvelopeDetail>),
 	OldBatches(Vec<BatchSummary>),
 	PdfBlob(Vec<u8>),
-	User(Option<crate::create_server::login::User>),
-	Users(Vec<crate::create_server::login::User>),
 	UnprocessedEnvelopes(Vec<UnprocessedEnvelope>),
 }
 #[derive(Serialize, Debug)]
