@@ -1,7 +1,7 @@
-/target
-/cert/*
-/oauth_keys/*
-config.toml
+**/target
+**/cert/*
+**/oauth_keys/*
+**config.toml
 *.sqlite3*
 *.odt
 *.pdf
