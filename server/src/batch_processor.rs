@@ -6,6 +6,7 @@ use async_recursion::async_recursion;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use shared::structs::EnvelopeDetail;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
 use tokio::task;
@@ -183,7 +184,7 @@ async fn new_batch_processor(
 		config: &Config,
 		mut token: AuthHelper,
 		db_writer: db::WriteTx,
-		envelope: db::EnvelopeDetail,
+		envelope: EnvelopeDetail,
 	) {
 		let request = client
 			.post(
@@ -303,7 +304,7 @@ async fn new_batch_processor(
 }
 
 impl NewEnvelope {
-	fn from_db_env(db_env: &db::EnvelopeDetail, config: &Config) -> Self {
+	fn from_db_env(db_env: &EnvelopeDetail, config: &Config) -> Self {
 		let mut env = Self {
 			template_id: config.docusign.templateId.clone(),
 			template_roles: vec![EnvelopeRecipient {
@@ -393,7 +394,7 @@ impl NewEnvelope {
 					},
 					lname
 				),
-				email: email,
+				email,
 				tabs: None,
 			})
 		}

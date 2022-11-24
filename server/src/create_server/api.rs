@@ -11,6 +11,7 @@ use axum::{
 	routing::{get, post},
 	Json, Router,
 };
+use shared::structs::NewBatchData;
 use tokio::sync::oneshot;
 
 use super::websocket_handler::{connect, ConnectorMsg, Resource};
@@ -84,7 +85,7 @@ async fn connect_ws_person(
 
 async fn new_batch(
 	State((wtx, btx)): State<(db::WriteTx, async_channel::Sender<()>)>,
-	Json(batch_data): Json<db::NewBatchData>,
+	Json(batch_data): Json<NewBatchData>,
 ) -> Result<impl IntoResponse, StatusCode> {
 	let (tx, rx) = oneshot::channel();
 	wtx.send((db::WriteAction::NewBatch(batch_data), tx))
