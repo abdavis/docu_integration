@@ -3,6 +3,7 @@
 use tokio::{sync::oneshot, task};
 
 use crate::{db, Config};
+use axum::routing::get;
 
 //mod admin;
 mod api;
@@ -26,7 +27,8 @@ pub async fn run(
 			db_wtx,
 			batch_processor_tx,
 			ws_handler_tx,
-		));
+		))
+		.route("/", get(hello_world));
 
 	let (tx, rx) = oneshot::channel();
 
@@ -39,6 +41,10 @@ pub async fn run(
 		})
 		.await
 		.expect("Failed to start server");
+}
+
+async fn hello_world() -> &'static str {
+	"Hello, World"
 }
 
 async fn graceful_shutdown(
