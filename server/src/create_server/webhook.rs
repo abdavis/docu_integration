@@ -1,11 +1,10 @@
 use axum::{
 	body::Bytes,
-	extract::{self, ContentLengthLimit, State},
+	extract::{self, State},
 	http::{header::HeaderMap, StatusCode},
 	routing::post,
 	Router,
 };
-use axum_macros::debug_handler;
 use ring::{constant_time::verify_slices_are_equal, hmac};
 use serde::Deserialize;
 use std::{sync::Arc, time::Duration};
@@ -17,15 +16,17 @@ pub fn create_routes(
 	config: &Config,
 	db_wtx: db::WriteTx,
 	completed_tx: async_channel::Sender<()>,
-) -> Router<(Arc<hmac::Key>, db::WriteTx, async_channel::Sender<()>)> {
+) -> Router {
 	let key = Arc::new(hmac::Key::new(
 		hmac::HMAC_SHA256,
 		config.docusign.hmac_key.as_bytes(),
 	));
 	let db_wtx = db_wtx.clone();
-	Router::with_state((key, db_wtx, completed_tx)).route("/webhook", post(webhook_handler))
+	Router::new().route(
+		"/webhook",
+		post(webhook_handler).with_state((key, db_wtx, completed_tx)),
+	)
 }
-#[debug_handler]
 async fn webhook_handler(
 	headers: HeaderMap,
 	State((key, wtx, completed_tx)): State<(
@@ -33,7 +34,7 @@ async fn webhook_handler(
 		db::WriteTx,
 		async_channel::Sender<()>,
 	)>,
-	ContentLengthLimit(body): extract::ContentLengthLimit<Bytes, 4096>,
+	body: Bytes,
 ) -> StatusCode {
 	println!("webhook hit");
 	match verify_msg(&key, &headers, &body).await {
