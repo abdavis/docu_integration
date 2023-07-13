@@ -24,11 +24,11 @@ futures = "0.3"
 rand = "0.8"
 rust-argon2 = "1.0"
 #dashmap = "5.3"
-axum = {version = "0.6.0-rc.1", features = ["headers", "http2", "ws"]}
-axum-macros = "0.3.0-rc.1"
+axum = {version = "0.6", features = ["headers", "http2", "ws"]}
 #axum-server = {version = "0.4", features = ["tls-rustls"]}
 lazy_static = "1.4"
 async-recursion = "1.0"
+openidconnect = "2"
 
 [profile.release]
 lto = true
